@@ -1,10 +1,10 @@
-# ⚡ IgnitronUSB
+# IgnitronUSB
 
 **A wireless USB/IP bridge and live-gauge dashboard for an aftermarket ECU — powered by an ESP32-S3.**
 
-IgnitronUSB lets a Windows device talk to a USB ECU (*Ignitron*) **over WiFi** using the
-standard [USB/IP](https://usbip.sourceforge.net/) protocol — no cable to the car
-required.  The built-in web dashboard shows live engine gauges. When you *do*
+IgnitronUSB lets a Windows device talk to a USB ECU (*designed for Ignitron*) **over WiFi** using the
+standard [USB/IP](https://usbip.sourceforge.net/) protocol — so that there is no cable to the car
+required.  The built-in web dashboard shows live engine gauges, just like Ignitron would. When you *do*
 want a wired connection, plug a USB-C cable into the piggyback port and the board
 hands the ECU straight to your laptop, automatically stepping the WiFi bridge out
 of the way. 
@@ -12,30 +12,33 @@ of the way.
 An automotive-grade buck supply runs the whole thing from the car, and
 a 5-minute idle timer powers everything down so nothing is left energised.
 
+![IgnitronUSB Web UI — dashboard, gauges, WiFi, diagnostics, USB capture, fault codes, data logger and OTA](/Images/ignitronUI.png)
+
+![IgnitronUSB Web UI — Arrange as Type, USB routing and logs on the board](/Images/ignitronUI-2.png)
+
 ---
 
-## ✨ Features
+## Features
 
-- 📡 **Wireless USB/IP bridge** — the ESP32-S3 hosts the ECU on its native USB and
+- **Wireless USB/IP bridge** — the ESP32-S3 hosts the ECU on its native USB and
   exports it over a self-contained WiFi soft-AP on TCP `3240`. Attach it on the
   laptop with `usbip` / `usbip-win2`.
-- 🔌 **Piggyback USB-C Passthrough** — plug a laptop into the USB-C port and an
+- **Piggyback USB-C Passthrough** — plug a laptop into the USB-C port and an
   FSUSB42 chip routes the ECU directly to the laptop at full-speed.
-- 📊 **Live Web Gauges** — a dark, phone-friendly dashboard served straight from the
+- **Live Web Gauges** — a dark, phone-friendly dashboard served straight from the
   ESP32 over WiFi. Any of the ECU's 384 channels, named and scaled exactly as
-  Ignitron's own log viewer shows them (the catalogue is extracted from
-  `Ignitron.exe`, and the wire layout is verified byte-for-byte against a real log).
-- 🧠 **Automatic USB Switching** — senses USB-C insertion/removal and automatically switches between ESP and USB-C.
-- 💤 **5-minute idle shutdown** — with no WiFi activity, the bridge and the ECU 5V
-  rail both cut, so the ECU sees an unplugged host and draws nothing.
-- 🩺 **Status LED** — at a glance: slow flash = nothing on USB-A, double blink =
+  Ignitron's own log viewer shows them.
+- **Automatic USB Switching** — senses USB-C insertion/removal and automatically switches between ESP and USB-C.
+- **5-minute idle shutdown** — with no WiFi activity, the bridge and the ECU 5V
+  rail both turn off, so the ECU sees an unplugged host and shuts down.
+- **Status LED** — at a glance: slow flash = nothing on USB-A, double blink =
   device connected and idle, fast blink = transferring, solid = handed to USB-C.
-- 🛠️ **Raw frame tap** — a second TCP port (or the dashboard) records every raw ECU
+- **Raw frame tap** — a second TCP port (or the dashboard) records every raw ECU
   transfer, the same format the `tools/` scripts read.
 
 ---
 
-## 🔧 Hardware
+## Hardware
 
 Custom ESP32-S3 board (WROOM-1-N16, no PSRAM). Power comes from the car through an
 input-protected buck (TPS62933, 6.5–24 V → 5 V) and an AMS1117 3.3 V LDO. The ECU
@@ -87,6 +90,8 @@ auto-reset network (DTR → Q1 → `EN`, RTS → Q2 → `IO0`, MMBT3904 + 10 kΩ
 > (4.7 kΩ pin 6 → GND selects "open-source" `DTR#`, idle-LOW — wrong for this
 > circuit; only use with a direct DTR→IO0 hookup.) Un-NC `CTS#` on the next rev.
 
+Rev1 boards will need their RST/BOOT buttons pressed to launch boot.
+
 Pressing RESET makes the status LED drop out / glow faintly while held — that's
 just GPIO4 floating during reset, not a fault.
 
@@ -95,7 +100,7 @@ Refs: [CH340 datasheet (CH340DS1)](https://cdn.sparkfun.com/assets/5/0/a/8/5/CH3
 
 ---
 
-## 🧭 How it works — the four stages
+## How it works — the four stages
 
 ```mermaid
 stateDiagram-v2
@@ -163,7 +168,7 @@ device, so you need the USB/IP client **and** that same driver bound to it.
 5. **Launch the Ignitron software** — it finds the ECU as if plugged in locally.
 6. **Detach** when done: `usbip detach -p 0`.
 
-## 📶 Using the WiFi bridge
+## Using the WiFi bridge
 
 1. Join the WiFi network **`IgnitronUSB`**. By default it is an **open** network
    (no password). You can set an SSID and password later from the **Settings** tab.
@@ -178,7 +183,7 @@ device, so you need the USB/IP client **and** that same driver bound to it.
 
 ### Supported USB devices
 
-The bridge is class-agnostic: whatever the ESP32-S3 full/low-speed host can
+The bridge is designed to be class-agnostic: whatever the ESP32-S3 full/low-speed host can
 enumerate is exported unchanged, and the driver on the laptop talks to it as if
 it were local. Verified transfer paths cover **mass storage**, **HID** (keyboards,
 mice — interrupt-IN URBs stay pending indefinitely, as the HID stack expects),
@@ -200,7 +205,7 @@ resubmitting any URB a driver keeps parked on the interface meanwhile.
 Limits: one device at a time, no isochronous endpoints (audio/video), at most
 7 data endpoints (DWC host-channel count), and IN URBs up to 64 KB.
 
-### The gauge protocol — proven, not fitted
+### The Ignitron Gauge Protocol
 
 Ignitron's PC software polls the ECU with one vendor control request and reads
 the answer from bulk-IN endpoint 1. Every poll cycle is two of these:
@@ -217,29 +222,17 @@ knock/lambda DSP's variables; the 704 B block is everything else.
 
 The channel catalogue itself — name, unit, decimals, multiplier, offset and
 dial range for all 384 channels, plus the 303 "status bit" definitions — is
-not reverse-engineered from data at all. It is read straight out of the
-installed `Ignitron.exe`, which carries it as a Windows string table
-(ID `6000 + channel`, plus `7000 + n` for `name, channel, bit`) and a
-`float[512][7]` table next to the code that formats values for the log viewer:
+not reverse-engineered from data at all. 
 
 ```
 engineering = (raw × mult + offset) / 10^decimals     raw = int16 if the display minimum < 0, else uint16
 ```
-
-`tools/verify_map.py` then checks the whole thing against a real session: a
-tapcap capture (`session1.bin`) and the Ignitron log recorded at the same time
-(`logs/Adam_Forbes_20260914_1842_.ilf`), paired sample-for-frame on the ECU's
-own frame counter (channel 347). Result:
 
 | channels | verdict |
 |---:|---|
 | 144 live | **bit-identical** to the logged value at every paired sample |
 | 236 constant | same constant on the wire |
 | 4 (32, 381, 382, 383) | computed by the PC into the log (AFR = λ × stoich, USB timing, timestamp); the ECU sends 0 |
-
-and the viewer's displayed values (`tools/ignitron_channels.txt`, transcribed
-at one cursor) reproduce from the log's raw values with the exe's table for
-every channel whose value wasn't jittering between samples.
 
 Regenerating the firmware table from scratch:
 
@@ -250,11 +243,11 @@ py tools/make_channel_map.py               # -> tools/channel_map.csv (keys, gro
 py tools/gen_gauges.py                     # -> include/gauges_table.h
 ```
 
-Caveats worth knowing: the exe rewrites a few table rows at runtime from the
+Caveats worth knowing: the Ignitron Software rewrites a few table rows at runtime from the
 loaded tune (the CAN torque channels are re-scaled to the tune's MDI torque
 value, user-defined sensors get their own calibration), so those rows carry the
 compile-time defaults; and the viewer converts km/h to mph when told to, the
-ECU always sends km/h.
+ECU always sends km/h.  Since these are within the executable, they are unknowns.
 
 ### Session handshake, tune reads and the "password protect" feature
 
@@ -333,6 +326,8 @@ something changes (`idle`, `WOT 3rd`, `AC on`…), press **Stop**, then
 **Download .bin**. The recording lives in the browser tab, so stay on the page
 while it runs.
 
+<p align="center"><img src="/Images/ui-usb.png" alt="Diagnostics tab — USB connectivity (attached device, USB/IP and capture clients, frame counters, data-flow trace and event log) and the USB capture recorder with notes" width="300"></p>
+
 **From a laptop** — a second TCP port (`3241`) streams the same records:
 
 ```bash
@@ -348,26 +343,54 @@ timeline; `tools/ilf_parse.py` reads the Ignitron `.ilf` logs.
 
 ---
 
-## 🖥️ Web Dashboard
+## Web Dashboard
 
-The dashboard polls `/api/status` (~10 Hz) and is split into three tabs:
+The dashboard polls `/api/status` (~10 Hz) and is split into six tabs:
 
 - **Dashboard** — animated radial gauges: a big top dial (RPM by default, selectable) plus
   whatever channels are ticked on the Gauges tab. In the flat layout, drag a dial to
   reorder (press and hold first on a phone); the order is saved on the board.
+  **Arrange as Type** splits the grid into Basic / Ignition / Knock / Injection /
+  Advanced sections instead.
+
+<p align="center">
+  <img src="/Images/ui-dashboard.png" alt="Dashboard tab — big RPM dial and the flat grid of ticked gauges" width="300">
+  <img src="/Images/ui-dashboard-types.png" alt="Dashboard tab — Arrange as Type: the same dials grouped into Basic, Ignition and Advanced sections" width="300">
+</p>
+
+- **Gauges** — the layout switches (Arrange as Type, needle sweep on connect,
+  auto-connect on page open, which gauge owns the top dial) and the 384-channel
+  catalogue in six dropdowns, ticked on or off (16 on at once).
+
+<p align="center"><img src="/Images/ui-gauges.png" alt="Gauges tab — dashboard layout switches, top-gauge selector and the channel catalogue with the Temperatures group open" width="300"></p>
+
 - **Settings** —
   - **WiFi access point**: edit the **SSID** and **password**. Leave the password
     blank for an **open** network; a password, if set, must be **≥ 8 characters**
     (WPA2 minimum). Saving stores the credentials in NVS and reboots the device to
     re-broadcast the AP.
+  - **WiFi channel**: scan the 2.4 GHz band and move the AP to the quietest of
+    1 / 6 / 11.
+  - **USB routing**: pin the ECU to the WiFi bridge or the USB-C port instead of
+    following VBUS detection.
   - **Bridge behaviour**: **USB-C disables WiFi bridge** (stage 2) and
-    **Restore WiFi bridge when USB-C unplugged** (stage 3), plus **Wake / keep alive**.
+    **Restore WiFi bridge when USB-C unplugged** (stage 3), plus the 5-minute
+    auto power-off.
   - **Factory reset**: restore the open `IgnitronUSB` AP (no password) at `192.168.1.1`.
-- **Diag** — system chips (USB-C / ECU 5V / route / auto-off countdown), the ECU's
-  own COM/DSP/CPU bootloader + firmware versions, plus board firmware, free heap,
-  ECU link, frame count and the AP SSID/IP.
 
-Settings are stored in EEP.
+<p align="center">
+  <img src="/Images/ui-wifi.png" alt="Settings tab — WiFi access point (SSID / password) and the WiFi channel card after a band scan, with per-channel congestion bars" width="300">
+  <img src="/Images/ui-bridge.png" alt="Settings tab — USB routing (Auto / USB-C / WiFi), bridge behaviour toggles and factory reset" width="300">
+</p>
+
+- **Diagnostics** — system chips (USB-C / ECU 5V / route / auto-off countdown), the ECU's
+  own COM/DSP/CPU bootloader + firmware versions, plus board firmware, free heap,
+  ECU link, frame count and the AP SSID/IP; below them the USB connectivity trace
+  and the raw-frame capture recorder (see [Raw frame capture](#raw-frame-capture)).
+
+<p align="center"><img src="/Images/ui-diagnostics.png" alt="Diagnostics tab — system, ECU firmware and diagnostics chips" width="300"></p>
+
+Settings are stored in NVS.
 
 ### Logging
 
@@ -390,8 +413,19 @@ words, *Select all* takes everything):
   the browser supports it (Chrome/Edge) rows stream straight into a file you pick;
   otherwise they're held and saved as CSV when you stop.
 
+<p align="center">
+  <img src="/Images/ui-logging.png" alt="Logging tab — data logger (board or browser, name, rate, flash usage bar and storage estimate) and the channels-to-log picker with the Temperatures group open" width="300">
+  <img src="/Images/ui-logs.png" alt="Logging tab — logs on the board with a recording in progress, CSV / raw download and delete per file, and the parameters export / import card" width="300">
+</p>
+
 **Parameters** export/import (same tab) saves the dashboard gauge set, layout,
 hero dial and the logging channel set + rate as a small JSON file.
+
+The same tab carries the **Fault codes & limp mode** card: live limp / fault-count
+chips from the stream, plus **Read** and **Clear** of the ECU's stored fault memory
+exactly as Ignitron's Fault codes window does it.
+
+<p align="center"><img src="/Images/ui-faults.png" alt="Logging tab — fault codes and limp mode chips, and the stored fault memory read back as a table (code, description, unit, RPM, load, value, frequency, duration)" width="300"></p>
 
 ### Factory Reset
 
@@ -405,25 +439,7 @@ defaults. Holding it without the confirmation press does nothing.
 > console CH340's DTR line, which is why a plain long-press is not enough — a
 > serial terminal asserting DTR would otherwise factory-reset the board.
 
-### HTTP API
-
-| Method | Route | Purpose |
-|--------|-------|---------|
-| `GET`  | `/api/status` | Telemetry + board/system state (JSON). `ch` = legacy fixed channels, `g` = enabled registry gauges, `ident` = ECU bootloader/firmware versions (COM/DSP/CPU) |
-| `GET`  | `/api/gauges` | Gauge registry: every channel with label/unit/range/decimals/group/type and its ECU channel index, plus on-state and whether the ECU sends it |
-| `POST` | `/api/gauges?key=..&on=0\|1` | Show/hide one gauge (persisted) |
-| `POST` | `/api/gauges?arrangeByType=0\|1` | Group the dashboard into Basic/Ignition/Knock/Injection/Advanced, or one flat grid |
-| `POST` | `/api/gauges?sweep=0\|1&autoLaunch=0\|1&hero=key&order=k1,k2,…` | Dashboard preferences: needle sweep on connect, launch on page open, top dial, flat-grid order (all persisted) |
-| `POST` | `/api/launch` | Replay the captured session handshake, then start the standalone gauge poll |
-| `POST` | `/api/unlaunch` | Stop the standalone gauge poll |
-| `GET`  | `/api/faults` | Read the ECU's stored fault memory (needs gauges launched, no USB/IP client) |
-| `POST` | `/api/faults/clear` | Wipe and commit the fault memory, as Ignitron's Clear button does |
-| `WS`   | `/ws/capture` | Raw USB record stream (binary frames, tapcap format); text frames sent up become `0xFF` note records. One client at a time |
-| `GET`  | `/api/ota/info` | Firmware version, board and chip revision |
-| `POST` | `/api/ota` | Firmware image upload (`firmware.bin` → `U_FLASH`), reboots when done |
-| `POST` | `/api/ota/fs` | Filesystem image upload (`littlefs.bin` → `U_SPIFFS`), does **not** reboot |
-
-### 📦 OTA updates
+### OTA updates
 
 The **OTA** tab updates the board over WiFi, no cable needed — the same
 `ota_manager` module used across the other Forbes Automotive ESP32 projects.
@@ -441,29 +457,18 @@ briefly serving a stale UI. The tab tracks which stage is done (persisted
 briefly in the browser, so the indicator survives the reboot) and pre-selects
 the firmware step when you come back.
 
+<p align="center"><img src="/Images/ui-ota.png" alt="OTA tab — firmware info and the two-step filesystem / firmware uploader" width="300"></p>
+
 Build the two images with `pio run` and `pio run -t buildfs`; they land in
 `$SYSTEMDRIVE/.platformio/ignitronusb-pio/build/ignitronusb-idf/` as
 `firmware.bin` and `littlefs.bin`.
 
 An upload also holds off the 5-minute idle watchdog (`otaInProgress()` feeds
 `compute_wifi_in_use()`), so the radio and ECU rail can't be cut mid-write.
-| `GET`  | `/api/wifi` | Current AP SSID, whether secured, and IP |
-| `POST` | `/api/wifi?ssid=..&password=..` | Set AP credentials (blank or ≥ 8-char password) and reboot |
-| `POST` | `/api/factory` | Restore factory defaults (open AP) and reboot |
-| `POST` | `/api/settings?usbcDisablesWifi=1&restoreWifiOnUnplug=0` | Update + persist toggles |
-| `POST` | `/api/wake` | Re-power the ECU and restart the idle timer |
-| `GET/POST` | `/api/log/config` | Logging channel set (`channels=12,15,…` ECU indices) and `rate` |
-| `POST` | `/api/log/start[?name=…]`, `/api/log/stop` | Device logging (optional file name) |
-| `POST` | `/api/log/clear` | Delete every stored log (except one being written) |
-| `GET`  | `/api/log/status` | Running state, rows/bytes, flash free, stored files |
-| `GET`  | `/api/log/download?name=…&fmt=csv\|raw` | Download a log (CSV converted on the fly) |
-| `POST` | `/api/log/delete?name=…` | Delete a stored log |
-| `GET`  | `/api/log/sample` | One row of the logging channel set (browser-side logging) |
-| `GET/POST` | `/api/params` | Export / import dashboard + logging parameters (JSON) |
 
 ---
 
-## 🔨 Building
+## Building
 
 Two PlatformIO environments build the same sources:
 
@@ -497,7 +502,7 @@ Notes for the `-idf` env:
   was built with, plus the overrides marked at the top; the effective config lands
   in `sdkconfig.ignitronusb-idf` (generated, ignored).
 
-## 🐛 Debugging
+## Debugging
 
 Tagged, per-subsystem serial debug is configured in [`include/defs.h`](include/defs.h)
 (`enableDebug` master switch; `[SYS] [WiFi] [USB] [ECU] [TAP] [WEB]` tags). Per-URB
@@ -511,7 +516,7 @@ break serial-adapter drivers. A 1 Hz line summarises key state:
 
 ---
 
-## 🙏 Credits & License
+## Credits & License
 
 - USB/IP + USB-host core ported from
   [tiehfood/esphome-usbip-printer](https://github.com/tiehfood/esphome-usbip-printer)
