@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f14" />
+  <title>IgnitronUSB — Live Gauges</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">IgnitronUSB</div>
+    <div class="launch">
+      <button id="launchGauges" class="btn primary">Launch Gauges</button>
+      <span id="launchMsg" class="msg"></span>
+    </div>
+    <div class="status">
+      <span id="link" class="dot"></span>
+      <span id="linkText">connecting…</span>
+      <span class="meta" id="meta"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="gauges">Gauges</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="diag">Diagnostics</button>
+    <button class="tab" data-tab="logging">Logging</button>
+    <button class="tab" data-tab="ota">OTA</button>
+  </nav>
+
+  <main>
+    <!-- Dashboard -->
+    <section class="tabpanel active" id="tab-dashboard">
+      <div class="hero">
+        <canvas id="g_rpm" class="gauge-lg"></canvas>
+      </div>
+      <!-- dials are built from the gauge registry; see app.js rebuildDashboard() -->
+      <div id="gaugeHost"></div>
+    </section>
+
+    <!-- Gauges -->
+    <section class="tabpanel" id="tab-gauges">
+      <div class="card">
+        <h2>Dashboard layout</h2>
+        <div class="settings">
+          <label class="sw"><input type="checkbox" id="arrangeByType"><span class="track"></span><span class="lbl">Arrange as Type</span></label>
+          <label class="sw"><input type="checkbox" id="sweepOnLaunch"><span class="track"></span><span class="lbl">Sweep the needles when the ECU connects</span></label>
+          <label class="sw"><input type="checkbox" id="autoLaunch"><span class="track"></span><span class="lbl">Auto-connect when this page opens</span></label>
+        </div>
+        <label class="field"><span>Top gauge</span>
+          <select id="heroSelect"></select>
+        </label>
+        <p class="hint"><strong>Arrange as Type</strong> on: the dashboard splits into
+          <strong>Basic</strong>, <strong>Ignition</strong>, <strong>Knock</strong>,
+          <strong>Injection</strong> and <strong>Advanced</strong> sections. Off: one flat grid,
+          and you can drag a dial to reorder it (press and hold first on a phone).
+          <strong>Auto-connect</strong> presses Launch Gauges for you whenever the page opens.</p>
+      </div>
+
+      <div class="card">
+        <h2>Channels</h2>
+        <p class="hint">Tick a channel to put it on the dashboard. Only ticked channels are
+          decoded and sent, so leaving the list mostly off keeps things quick. The ECU streams
+          <strong>384</strong> channels, named and scaled exactly as Ignitron's own log viewer
+          shows them. Four (AFR, USB timing, log timestamp) are worked out by the PC software
+          rather than sent by the ECU, so they're listed as <em>not sent by the ECU</em>.</p>
+        <div class="settings">
+          <label class="sw"><input type="checkbox" id="hideUnmapped" checked><span class="track"></span><span class="lbl">Hide channels the ECU doesn't send</span></label>
+        </div>
+        <div class="gaugebar">
+          <span id="gaugeCount" class="meta"></span>
+          <span id="gaugeMsg" class="msg"></span>
+        </div>
+        <div class="gpickers" id="gaugeGroups"></div>
+      </div>
+    </section>
+
+    <!-- Logging -->
+    <section class="tabpanel" id="tab-logging">
+      <div class="card" id="faultCard">
+        <h2>Fault codes &amp; limp mode</h2>
+        <p class="hint">The chips come from the live stream while gauges are launched. <strong>Read</strong>
+          fetches the ECU's stored fault memory the way Ignitron's Fault codes window does (code,
+          RPM and load when it was set, the fault's own value, how often and for how long);
+          <strong>Clear</strong> wipes it and commits, again exactly as Ignitron does. Both need the
+          gauges launched and no PC attached over USB/IP.</p>
+        <div class="sysgrid" id="faultgrid"></div>
+        <div class="actions">
+          <button id="faultRead" class="btn primary">Read fault memory</button>
+          <button id="faultClear" class="btn danger">Clear fault memory</button>
+          <span id="faultMsg" class="msg"></span>
+        </div>
+        <div id="faultList" class="faultlist"></div>
+      </div>
+
+      <div class="card">
+        <h2>Data logger</h2>
+        <p class="hint">Record any of the ECU's channels &mdash; this list is independent of the
+          dashboard, so you can log every channel while showing 16 dials. <strong>On the board</strong>
+          writes a compact log to the board's own flash (saved as it goes; survives closing this
+          page) and you download it as CSV afterwards. <strong>In this browser</strong> keeps the
+          rows here and saves a CSV when you stop (or streams straight to a file where the
+          browser allows it). Gauges must be launched for data to flow.</p>
+        <div class="logbar">
+          <label class="field inline"><span>Where</span>
+            <select id="logMode">
+              <option value="device">On the board (flash)</option>
+              <option value="browser">In this browser</option>
+            </select>
+          </label>
+          <label class="field inline" id="logNameField"><span>Name (optional)</span>
+            <input type="text" id="logName" maxlength="24" placeholder="e.g. track_day_1" autocomplete="off" />
+          </label>
+          <label class="field inline"><span>Rate</span>
+            <select id="logRate">
+              <option value="1">1 Hz</option><option value="2">2 Hz</option><option value="5">5 Hz</option>
+              <option value="10" selected>10 Hz</option><option value="20">20 Hz</option>
+            </select>
+          </label>
+          <button id="logStart" class="btn primary">Start logging</button>
+          <button id="logBrowserSave" class="btn" hidden>Save CSV</button>
+          <span id="logMsg" class="msg"></span>
+        </div>
+        <div class="sysgrid" id="logStatus"></div>
+        <div class="flashbar" id="flashBar"><div class="fill" id="flashFill"></div><span class="lbl" id="flashLbl">flash --</span></div>
+        <p class="hint" id="logEstimate"></p>
+        <p class="hint">Tip: for lots of channels use a <strong>low rate</strong>. Engine temperatures and
+          pressures barely move between samples, so 1&ndash;2&nbsp;Hz across the whole catalogue costs
+          a few KB a minute, while 20&nbsp;Hz is for a handful of fast channels (RPM, MAP, knock,
+          lambda). The estimate above updates as you change the selection and rate.</p>
+      </div>
+
+      <div class="card">
+        <h2>Channels to log</h2>
+        <div class="gaugebar">
+          <span id="logCount" class="meta"></span>
+          <input type="search" id="logSearch" class="search" placeholder="filter channels&hellip;" autocomplete="off" />
+          <button id="logSelectMain" class="btn small" title="Every measurement channel; leaves out the status-bit words">Select main</button>
+          <button id="logSelectAll" class="btn small">Select all</button>
+          <button id="logClear" class="btn small">Clear all</button>
+        </div>
+        <div class="gpickers" id="logGroups"></div>
+      </div>
+
+      <div class="card">
+        <h2>Logs on the board</h2>
+        <p class="hint">CSV is built from the stored rows when you download it, using the same
+          names, units and scaling as the dashboard. Raw is the board's binary format. Logs stay
+          on the board until deleted &mdash; export what you want to keep, then clear.</p>
+        <div id="logFiles" class="logfiles"></div>
+        <div class="actions">
+          <button id="logClearFlash" class="btn danger small">Clear all logs from flash</button>
+          <span id="logFilesMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Parameters</h2>
+        <p class="hint">Export saves your choices &mdash; dashboard gauges, layout, hero dial, and the
+          logging channel set and rate &mdash; to a small JSON file. Import applies one, so a setup
+          can be moved between boards or kept as a backup.</p>
+        <div class="actions">
+          <a id="paramsExport" class="btn" href="/api/params" download="ignitronusb-params.json">Export parameters</a>
+          <button id="paramsImportBtn" class="btn">Import parameters&hellip;</button>
+          <input type="file" id="paramsImport" accept="application/json,.json" hidden />
+          <span id="paramsMsg" class="msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="tabpanel" id="tab-settings">
+      <div class="card">
+        <h2>WiFi access point</h2>
+        <p class="hint">The network this device broadcasts. Leave the password blank for an
+          <strong>open</strong> network; a password, if set, must be at least 8 characters.
+          Saving reboots the device.</p>
+        <label class="field"><span>Network name (SSID)</span>
+          <input type="text" id="wifiSsid" maxlength="32" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="field"><span>Password <em id="secBadge"></em></span>
+          <input type="password" id="wifiPass" maxlength="63" autocomplete="new-password"
+                 placeholder="leave blank = open network" />
+        </label>
+        <label class="sw sw-inline"><input type="checkbox" id="showPass"><span class="track"></span><span class="lbl">Show password</span></label>
+        <div class="actions">
+          <button id="wifiSave" class="btn primary">Save &amp; reboot</button>
+          <span id="wifiMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>WiFi channel</h2>
+        <p class="hint">The bridge needs only a few Mbit/s, but every lost WiFi frame stalls the
+          USB stream, so a <strong>quiet</strong> channel beats a fast one. Scan the band, pick
+          the emptiest of <strong>1 / 6 / 11</strong> (the non-overlapping ones), then apply.
+          Scanning pauses the link for ~2&nbsp;s &mdash; don't do it mid-transfer. Applying reboots.</p>
+        <div class="chan-chart-wrap">
+          <canvas id="chanChart" height="150"></canvas>
+        </div>
+        <div class="chan-legend" id="chanLegend">Press <strong>Scan</strong> to see what's on the air.</div>
+        <div class="seg chan-seg" id="chanSeg" role="group" aria-label="WiFi channel"></div>
+        <div class="actions">
+          <button id="chanScan" class="btn">Scan</button>
+          <button id="chanApply" class="btn primary" disabled>Apply &amp; reboot</button>
+          <span id="chanMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>USB routing</h2>
+        <p class="hint">VBUS auto-detect is unreliable on this board, so pick where the
+          ECU (USB-A) is connected. <strong>Auto</strong> follows USB-C detection;
+          <strong>USB-C</strong> forces the laptop route; <strong>WiFi</strong> forces the
+          on-board bridge. Forced routes stay powered (no idle shutdown).</p>
+        <div class="seg" id="routeSeg" role="group" aria-label="USB route">
+          <button class="seg-btn" data-route="auto">Auto</button>
+          <button class="seg-btn" data-route="usbc">USB-C</button>
+          <button class="seg-btn" data-route="wifi">WiFi</button>
+        </div>
+        <span id="routeMsg" class="msg"></span>
+      </div>
+
+      <div class="card">
+        <h2>Bridge behaviour</h2>
+        <div class="settings">
+          <label class="sw"><input type="checkbox" id="setDisWifi"><span class="track"></span><span class="lbl">USB-C disables WiFi bridge</span></label>
+          <label class="sw"><input type="checkbox" id="setResWifi"><span class="track"></span><span class="lbl">Restore WiFi bridge when USB-C unplugged</span></label>
+          <label class="sw"><input type="checkbox" id="setIdleOff"><span class="track"></span><span class="lbl">Auto power-off ECU after 5&nbsp;min idle</span></label>
+        </div>
+        <p class="hint">With auto power-off <strong>on</strong>, the ECU 5&nbsp;V rail cuts after
+          5&nbsp;minutes with no activity (the timer shows in Diagnostics). Turn it
+          <strong>off</strong> to keep the ECU powered permanently.</p>
+      </div>
+
+      <div class="card danger-card">
+        <h2>Factory reset</h2>
+        <p class="hint">Restore defaults: open AP <code>IgnitronUSB</code> with no password, at
+          <code>192.168.1.1</code>. From the board: hold <strong>BOOT</strong> for 3&nbsp;s until the
+          LED strobes, release, then press it again.</p>
+        <div class="actions">
+          <button id="factoryBtn" class="btn danger">Restore factory defaults</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Diag -->
+    <section class="tabpanel" id="tab-diag">
+      <div class="card">
+        <h2>System</h2>
+        <div class="sysgrid" id="sysgrid"></div>
+      </div>
+      <div class="card">
+        <h2>ECU firmware</h2>
+        <p class="hint">Bootloader and firmware versions of the ECU's three processors, as
+          Ignitron's firmware manager lists them. Read at session start, whether the PC or
+          this board opened the session; <code>--</code> until an ECU session has started.</p>
+        <div class="sysgrid" id="identgrid"></div>
+      </div>
+      <div class="card">
+        <h2>Diagnostics</h2>
+        <div class="sysgrid" id="diaggrid"></div>
+      </div>
+      <div class="card">
+        <h2>USB connectivity</h2>
+        <p class="hint"><strong>USB device</strong> is whatever is plugged into the USB-A
+          port (the ECU or, here, a USB disk). <strong>USB/IP client</strong> is a computer
+          that has attached that device over WiFi so it appears as a local USB port.
+          <strong>Capture client</strong> is a tool connected to the raw-frame tap port,
+          recording USB traffic while the gauges keep running.</p>
+        <div class="sysgrid" id="usbgrid"></div>
+        <div class="trace">
+          <div class="trace-head">
+            <span>Data flow (IN&nbsp;▲ / OUT&nbsp;▼, B/s)</span>
+            <span id="usbRate" class="trace-rate">—</span>
+          </div>
+          <canvas id="usbTrace" class="trace-canvas"></canvas>
+        </div>
+        <div class="trace-log" id="usbLog"></div>
+      </div>
+      <div class="card">
+        <h2>USB capture</h2>
+        <p class="hint">Records the raw USB traffic between this board and the ECU, in the
+          format the <code>tools/</code> scripts read (e.g. to re-verify the channel map
+          against an Ignitron log, or to look at a session handshake). Start, drive (or work
+          through the Ignitron screens), add a note whenever something changes ("idle",
+          "WOT 3rd", "AC on"), then stop and <strong>Download</strong> the <code>.bin</code>.
+          Nothing here touches the gauges or the bridge; it just copies what already flows.
+          Your phone or laptop keeps the recording, so stay on this page while it runs.</p>
+        <div class="sysgrid" id="capgrid"></div>
+        <div class="actions">
+          <button class="btn primary" id="capStart">Start capture</button>
+          <button class="btn danger" id="capStop" disabled>Stop</button>
+          <button class="btn" id="capDownload" disabled>Download .bin</button>
+          <span class="msg" id="capMsg"></span>
+        </div>
+        <label class="field" style="margin-top:12px"><span>Note <em>— stamped into the recording at the moment you press Add</em></span>
+          <div class="actions" style="margin-top:0">
+            <input type="text" id="capNote" maxlength="200" placeholder="e.g. idle, warm, AC on" disabled style="flex:1;min-width:200px" />
+            <button class="btn" id="capNoteAdd" disabled>Add note</button>
+          </div>
+        </label>
+        <div class="trace-log" id="capLog"></div>
+      </div>
+    </section>
+
+    <!-- OTA -->
+    <section class="tabpanel" id="tab-ota">
+      <div class="card">
+        <h2>Firmware info</h2>
+        <div class="sysgrid" id="otaInfo"></div>
+      </div>
+
+      <div class="card">
+        <h2>Over-the-air update</h2>
+        <p class="hint"><strong>Filesystem</strong> updates the web interface
+          (<code>littlefs.bin</code>). <strong>Firmware</strong> updates the application
+          (<code>firmware.bin</code>). Do the filesystem first, then the firmware — only the
+          firmware step reboots, so the two land together.</p>
+
+        <div class="ota-steps" id="otaSteps">
+          <div class="ota-step" data-step="filesystem"><span class="ota-step-num">1</span> Filesystem</div>
+          <div class="ota-step" data-step="firmware"><span class="ota-step-num">2</span> Firmware</div>
+        </div>
+
+        <label class="field"><span>Update type</span>
+          <select id="otaType">
+            <option value="filesystem">Filesystem (web UI)</option>
+            <option value="firmware">Firmware (application)</option>
+          </select>
+        </label>
+        <div class="field"><span>Binary (.bin)</span>
+          <div class="actions" style="margin-top:6px">
+            <label class="btn" for="otaFile">Choose file&hellip;</label>
+            <input type="file" id="otaFile" class="file-hidden" accept=".bin,application/octet-stream" />
+            <span id="otaFileName" class="ota-file-name"></span>
+          </div>
+        </div>
+
+        <div class="ota-progress" id="otaProgressWrap" style="display:none">
+          <div class="ota-progress-bar" id="otaProgressBar"></div>
+          <div class="ota-progress-label" id="otaProgressLabel">0%</div>
+        </div>
+
+        <div class="actions">
+          <button id="otaUploadBtn" class="btn primary" disabled>Upload</button>
+        </div>
+        <div class="ota-status" id="otaStatus"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- version query busts the browser cache after a filesystem OTA, which
+       would otherwise serve the old app.js against the new firmware -->
+  <script src="/faults.js?v=0.5c"></script>
+  <script src="/app.js?v=0.5c"></script>
+</body>
+</html>
