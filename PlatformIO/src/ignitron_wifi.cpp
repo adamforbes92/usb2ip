@@ -337,12 +337,6 @@ void setupWebRoutes()
   // matches "<uri>/..." prefixes too). Two-stage OTA by design: the filesystem
   // image carries the web UI and does NOT reboot, the firmware upload follows
   // it and reboots once at the end. See ota_manager.h.
-  ota_config_t ocfg = otaDefaultConfig();
-  ocfg.fwVersion  = FW_VERSION;
-  ocfg.product    = "Ignitron USB";
-  ocfg.githubRepo = "adamforbes92/usb2ip"; // Releases/ + releases.json for "Check for updates"
-  ocfg.verbose    = true;       // routed through the [OTA] serial tag
-  otaManagerInit(&ocfg);
   otaManagerAttach(server);
   wifiManagerAttachSta(server);
 
@@ -1099,9 +1093,19 @@ void setupUI()
   // tuning have no equivalent in the shared module.
   wifimgr_config_t wcfg = wifiDefaultConfig();
   wcfg.hostName  = AP_SSID;
-  wcfg.mdnsName  = nullptr;     // no mDNS on this product (never had it)
-  wcfg.fwVersion = FW_VERSION;  // substituted for %FW_VERSION% in index.html
+  wcfg.mdnsName  = "ignitron";  // -> http://ignitron.local
+  wcfg.fwVersion = FW_VERSION;  // recovery page only; index.html bakes its own
   wcfg.manageAp  = false;
+  // MUST precede wifiManagerInit(): that mounts the web-UI filesystem via
+  // otaFsMountSafe(), so ota_manager has to be configured first or a failed
+  // mount passes silently.
+  ota_config_t ocfg = otaDefaultConfig();
+  ocfg.fwVersion  = FW_VERSION;
+  ocfg.product    = "Ignitron USB";
+  ocfg.githubRepo = "adamforbes92/usb2ip"; // Releases/ + releases.json for "Check for updates"
+  ocfg.verbose    = true;       // routed through the [OTA] serial tag
+  otaManagerInit(&ocfg);
+
   wifiManagerInit(&wcfg);
   if (otaFsMounted())
   {
