@@ -1,0 +1,23 @@
+{
+  "product": "IgnitronUSBController",
+  "latest": "0.6",
+  "releases": [
+    {
+      "version": "0.6",
+      "channel": "stable",
+      "date": "2026-09-21",
+      "ota": true,
+      "notes": "OTA overhaul: update from GitHub, Home WiFi bridge mode, recovery page; shared ota_manager/wifi_manager v2.",
+      "firmware": {
+        "path": "V0.6/firmware.bin",
+        "size": 1270288,
+        "sha256": "d230b12400c1885535d2332ee0b225962dec8260d0cc8fd10a0b3269a7adf00e"
+      },
+      "filesystem": {
+        "path": "V0.6/littlefs.bin",
+        "size": 3538944,
+        "sha256": "c4cc7f674ba5cf3e418e7f2ee4f189ca261b6c7186a29b4339cdc38aff0dc363"
+      }
+    }
+  ]
+}
