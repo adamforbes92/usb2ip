@@ -56,6 +56,9 @@ bool PortController::compute_wifi_in_use() {
   // partition. This is the ota_manager powerIsBusy() hook for this project.
   if (otaInProgress()) return true;
   if (WiFi.softAPgetStationNum() > 0) return true;
+  // A phone working through the home router (Home WiFi bridge mode) is not an
+  // AP station - any web request in the last 30 s counts as in use.
+  if (otaWebClientActive()) return true;
   return usbip::g_usbip_component && usbip::g_usbip_component->client_attached();
 }
 

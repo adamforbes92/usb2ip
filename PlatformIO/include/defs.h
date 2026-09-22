@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 // IgnitronUSB — build/version + WiFi soft-AP config
 // ---------------------------------------------------------------------------
-#define FW_VERSION "0.5"
+#define FW_VERSION "0.6" // OTA overhaul: shared ota_manager/wifi_manager v2 + ota.js (guided GitHub update, Home WiFi bridge, recovery page)
 
 // Soft-AP the laptop connects to before running the usbip-win2 client. These
 // are the factory DEFAULTS only — the live SSID/password are stored in NVS and

@@ -5,6 +5,7 @@
 #include "ecu_tap.h"
 #include "gauges.h"
 #include "ota_manager.h"
+#include "wifi_manager.h"
 #include "usbip_bridge.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -207,6 +208,7 @@ void requestReboot() { s_reboot_at = millis() + 400; }
 void wifiLoop()
 {
   capPump();
+  wifiManagerTick(); // Home WiFi (bridge mode): connection tracking + retry back-off
   if (s_reboot_at && (int32_t)(millis() - s_reboot_at) >= 0)
   {
     DEBUG_WIFI("rebooting to apply changes");
@@ -273,6 +275,10 @@ bool wifiBridgeStart()
     DEBUG_WIFI("soft-AP \"%s\" up (%s), IP %s [ch%d ps=off 11bgn HT20]", ssid.c_str(),
                pass.length() >= 8 ? "WPA2" : "OPEN", WiFi.softAPIP().toString().c_str(),
                chan);
+    // Home WiFi (bridge mode, shared wifi_manager): join the saved home router
+    // as a station alongside this AP so a phone on that network reaches the
+    // board and the internet at once (needed for "Update from GitHub").
+    wifiManagerStaStart();
   }
   else
     DEBUG_WIFI("soft-AP start FAILED");
@@ -283,6 +289,7 @@ void wifiBridgeStop()
 {
   if (!s_wifi_on)
     return;
+  wifiManagerStaStop();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
   s_wifi_on = false;
@@ -290,6 +297,17 @@ void wifiBridgeStop()
 }
 
 bool wifiBridgeActive() { return s_wifi_on; }
+
+// ota_manager hook: a filesystem update unmounts LittleFS before rewriting the
+// partition, so a running data-log (which writes to /logs) must be closed first.
+void otaOnStart(bool filesystem)
+{
+  if (filesystem && logger::running())
+  {
+    DEBUG_WEB("filesystem update starting - stopping the data logger");
+    logger::stop();
+  }
+}
 
 static const char *muxName(port::MuxMode m)
 {
@@ -313,8 +331,20 @@ static const char *routeName(port::RouteMode m)
 
 void setupWebRoutes()
 {
-  // Serve the gauge UI (index.html, style.css, app.js) from LittleFS.
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  // Shared OTA + Home WiFi routes FIRST: ota_manager's first route carries the
+  // filter that notes web activity for every request (otaWebClientActive()),
+  // and /api/wifi/sta must precede our own /api/wifi routes (the server
+  // matches "<uri>/..." prefixes too). Two-stage OTA by design: the filesystem
+  // image carries the web UI and does NOT reboot, the firmware upload follows
+  // it and reboots once at the end. See ota_manager.h.
+  ota_config_t ocfg = otaDefaultConfig();
+  ocfg.fwVersion  = FW_VERSION;
+  ocfg.product    = "Ignitron USB";
+  ocfg.githubRepo = "adamforbes92/usb2ip"; // Releases/ + releases.json for "Check for updates"
+  ocfg.verbose    = true;       // routed through the [OTA] serial tag
+  otaManagerInit(&ocfg);
+  otaManagerAttach(server);
+  wifiManagerAttachSta(server);
 
   // Live telemetry — polled by the dashboard once per interval.
   server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -693,7 +723,7 @@ void setupWebRoutes()
     int r = WiFi.scanNetworks(true, true, false, 120);
     s_scan_running = (r == WIFI_SCAN_RUNNING);
     if (!s_scan_running) {
-      WiFi.mode(WIFI_AP);
+      if (!wifiManagerStaConfigured()) WiFi.mode(WIFI_AP);
       request->send(500, "application/json", "{\"ok\":false,\"err\":\"scan failed to start\"}");
       return;
     }
@@ -724,9 +754,10 @@ void setupWebRoutes()
         o["ch"] = WiFi.channel(i);
       }
       if (s_scan_running) {
-        // First read-out after completion: release the STA interface.
+        // First read-out after completion: release the STA interface (unless
+        // the Home WiFi bridge is using it).
         s_scan_running = false;
-        WiFi.mode(WIFI_AP);
+        if (!wifiManagerStaConfigured()) WiFi.mode(WIFI_AP);
         DEBUG_WIFI("band scan done: %d networks", n);
       }
     }
@@ -1059,33 +1090,39 @@ void setupWebRoutes()
 
 void setupUI()
 {
-  if (!LittleFS.begin(false))
-  {
-    DEBUG_WEB("LittleFS mount failed - run 'pio run -t uploadfs' to flash /data");
-  }
-  else
+  // Shared wifi_manager in "project-managed AP" mode: it mounts the web UI
+  // filesystem through the OTA guard (a half-written image never reaches lfs),
+  // serves "/" (UI, or a recovery page with the two uploads when the filesystem
+  // holds no usable UI), static files with no-cache revalidation, and the Home
+  // WiFi STA side. The soft-AP itself stays with wifiBridgeStart()/Stop():
+  // configurable SSID/channel, GB regulatory domain and the USB/IP throughput
+  // tuning have no equivalent in the shared module.
+  wifimgr_config_t wcfg = wifiDefaultConfig();
+  wcfg.hostName  = AP_SSID;
+  wcfg.mdnsName  = nullptr;     // no mDNS on this product (never had it)
+  wcfg.fwVersion = FW_VERSION;  // substituted for %FW_VERSION% in index.html
+  wcfg.manageAp  = false;
+  wifiManagerInit(&wcfg);
+  if (otaFsMounted())
   {
     logger::begin();
     DEBUG_WEB("LittleFS mounted (%u/%u KB used)",
               (unsigned)(LittleFS.usedBytes() / 1024),
               (unsigned)(LittleFS.totalBytes() / 1024));
   }
+  else
+  {
+    DEBUG_WEB("web UI filesystem not usable - recovery page will be served at /");
+  }
 
   setupWebRoutes();
-
-  // OTA (/api/ota, /api/ota/fs, /api/ota/info) — must be attached before
-  // server.begin(). Two-stage by design: the filesystem image carries the web
-  // UI and does NOT reboot, so the firmware upload follows it and reboots once
-  // at the end. See ota_manager.h.
-  ota_config_t ocfg = otaDefaultConfig();
-  ocfg.fwVersion = FW_VERSION;
-  ocfg.verbose = true;          // routed through the [OTA] serial tag
-  otaManagerInit(&ocfg);
-  otaManagerAttach(server);
 
   // Raw USB capture stream for the Diagnostics tab (see capWsEvent above).
   s_capWs.onEvent(capWsEvent);
   server.addHandler(&s_capWs);
+
+  // "/" + static files (must come after our own routes).
+  wifiManagerAttachStatic(server);
 
   server.begin();
   DEBUG_WEB("gauge UI on http://%s:%u", WiFi.softAPIP().toString().c_str(), WEB_HTTP_PORT);
