@@ -1,7 +1,24 @@
 {
-  "product": "IgnitronUSBController",
-  "latest": "0.6",
+  "product": "usb2ip",
+  "latest": "1.0",
   "releases": [
+    {
+      "version": "1.0",
+      "channel": "stable",
+      "date": "2026-10-12",
+      "ota": true,
+      "notes": "First full release (rebranded usb2ip): USB-A port on demand - boots in standby (5V off, mux open) until USB-C or a WiFi client asks; TPS2041B over-current fault read. Pre-1.0 parameter exports still import.",
+      "firmware": {
+        "path": "V1.0/firmware.bin",
+        "size": 1212112,
+        "sha256": "f30cb93d93d9917a41f1338792cb2b9b8b1d7205f4e760d0ec7d3f7af91d0395"
+      },
+      "filesystem": {
+        "path": "V1.0/littlefs.bin",
+        "size": 3538944,
+        "sha256": "6da50017c3037b697d03df9fa9801bfc24b7279122974bec4607e2a7c78da4c5"
+      }
+    },
     {
       "version": "0.6",
       "channel": "stable",
