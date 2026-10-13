@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB — ECU gauge-frame decoder.
+// usb2ip — ECU gauge-frame decoder.
 //
 // The ECU's bulk-IN endpoint carries fixed-size messages, one per transfer,
 // in answer to the tuning software's vendor control poll (bRequest 0xFA):

@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB — decoded ECU telemetry (gauge channels).
+// usb2ip — decoded ECU telemetry (gauge channels).
 //
 // A small, thread-safe snapshot of the latest decoded engine values. The USB
 // host task writes via update()/set(); the web-server task reads via snapshot().

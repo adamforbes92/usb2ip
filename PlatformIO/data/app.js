@@ -1,4 +1,4 @@
-// IgnitronUSB gauge UI — WebSocket-driven dark dashboard.
+// usb2ip gauge UI — WebSocket-driven dark dashboard.
 // Channel keys match the firmware TelemetryStore JSON ("rpm", "map", ...).
 
 const CH = {
@@ -600,20 +600,30 @@ const ROUTE_LABEL = { auto: "Auto (VBUS)", usbc: "Forced USB-C", wifi: "Forced W
 
 function renderSys(sys) {
   if (!sys) return;
-  const powerState = sys.asleep ? "Asleep" : sys.ecuPwr ? "On" : "Off";
+  const powerState = sys.ecuFault ? "Fault (over-current)"
+    : sys.asleep ? "Standby" : sys.ecuPwr ? "On" : "Off";
   setHTML(sysRoot,
-    chip("USB route", MUX_LABEL[sys.mux] || sys.mux, sys.mux === "off" ? "warn" : "ok") +
+    chip("USB route", sys.asleep && sys.mux === "off" ? "Open (standby)" : (MUX_LABEL[sys.mux] || sys.mux),
+         sys.mux === "off" ? (sys.asleep ? "" : "warn") : "ok") +
     chip("Override", ROUTE_LABEL[sys.route] || sys.route, sys.route && sys.route !== "auto" ? "ok" : "") +
     chip("USB-C", sys.usbc ? "Connected" : "—", sys.usbc ? "ok" : "") +
-    chip("ECU 5V", powerState, sys.asleep ? "warn" : sys.ecuPwr ? "ok" : "") +
+    chip("ECU 5V", powerState, sys.ecuFault ? "warn" : sys.ecuPwr ? "ok" : "") +
+    chip("5V faults", sys.ecuFaults
+           ? `${sys.ecuFaults} (last ${fmtAgo(sys.ecuFaultAgo)} ago)` : "None",
+         sys.ecuFaults ? "warn" : "") +
     chip("WiFi bridge", sys.wifiOn ? (sys.wifiUse ? "In use" : "Idle") : "Off",
          sys.wifiOn ? "ok" : "") +
     chip("Auto-off in",
-         (sys.idleOff === false || sys.usbc || (sys.route && sys.route !== "auto"))
+         sys.asleep ? "—"
+           : (sys.idleOff === false || sys.usbc || (sys.route && sys.route !== "auto"))
            ? "held" : fmtCountdown(sys.idleMs),
-         (sys.idleOff !== false && !sys.usbc && sys.idleMs && sys.idleMs < 60000 && sys.route === "auto") ? "warn" : ""));
+         (!sys.asleep && sys.idleOff !== false && !sys.usbc && sys.idleMs && sys.idleMs < 60000 && sys.route === "auto") ? "warn" : ""));
 
   if (sys.route) setRouteActive(sys.route);
+
+  // Port power + TPS2041B faults into the Diag event log (count catches the
+  // short OC# pulses that come and go between polls).
+  notePower(sys);
 
   if (!settingsLoaded) {
     setDisWifi.checked = !!sys.cDisWifi;
@@ -660,6 +670,38 @@ function noteChange(key, val, onMsg, offMsg) {
   if (usbState[key] === val) return;
   if (usbState[key] !== undefined) logUsb(val ? onMsg : offMsg, val ? "ok" : "warn");
   usbState[key] = val;
+}
+
+// Port power state + TPS2041B over-current into the event log. Faults are
+// warn-coloured, and any that happened before the page was opened are
+// reported on the first poll rather than silently baselined.
+function notePower(sys) {
+  const first = usbState.ecuFaults === undefined;
+  const n = sys.ecuFaults || 0;
+  if (first) {
+    if (n) logUsb(`ECU 5V: ${n} over-current event${n > 1 ? "s" : ""} since boot ` +
+                  `(last ${fmtAgo(sys.ecuFaultAgo)} ago)`, "warn");
+  } else if (n > usbState.ecuFaults) {
+    const d = n - usbState.ecuFaults;
+    logUsb(`ECU 5V over-current${d > 1 ? ` ×${d}` : ""} — TPS2041B OC# (${n} since boot)`, "warn");
+  }
+  usbState.ecuFaults = n;
+
+  const f = !!sys.ecuFault;
+  if (usbState.ecuFault !== undefined && f !== usbState.ecuFault)
+    logUsb(f ? "ECU 5V FAULT active — current limit / thermal shutdown" : "ECU 5V fault cleared",
+           f ? "warn" : "ok");
+  usbState.ecuFault = f;
+
+  noteChange("ecuPwr", !!sys.ecuPwr, "ECU 5V on (request)", "ECU 5V off — standby, USB-A open");
+}
+
+function fmtAgo(ms) {
+  if (ms == null) return "—";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
 function renderUsb(u, route) {
@@ -1172,7 +1214,7 @@ wifiSave.addEventListener("click", async () => {
 
 factoryBtn.addEventListener("click", async () => {
   if (!confirm("Restore factory defaults? The device will reboot as an open AP " +
-               "\"IgnitronUSB\" with no password.")) return;
+               "\"usb2ip\" with no password.")) return;
   wifiMsg.textContent = "Factory reset \u2014 rebooting\u2026"; wifiMsg.className = "msg ok";
   try { await fetch("/api/factory", { method: "POST" }); } catch (e) { /* reboot drops it */ }
 });

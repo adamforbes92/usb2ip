@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB — gauge registry.
+// usb2ip — gauge registry.
 //
 // One table (include/gauges_table.h, generated) describes every channel the
 // ECU streams: its index, how to scale it, what to call it, and which of the

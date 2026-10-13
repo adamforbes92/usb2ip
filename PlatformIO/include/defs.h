@@ -3,15 +3,17 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// IgnitronUSB — build/version + WiFi soft-AP config
+// usb2ip — build/version + WiFi soft-AP config
 // ---------------------------------------------------------------------------
-#define FW_VERSION "0.6" // OTA overhaul: shared ota_manager/wifi_manager v2 + ota.js (guided GitHub update, Home WiFi bridge, recovery page)
+#define FW_VERSION "1.0" // first full release: the 0.7 port-on-demand build, released as 1.0
+// 0.7  USB-A port on demand: boot in standby (5V off, mux open) until USB-C or a WiFi client asks; TPS2041B OC# fault read on IO16
+// 0.6  OTA overhaul: shared ota_manager/wifi_manager v2 + ota.js (guided GitHub update, Home WiFi bridge, recovery page)
 
 // Soft-AP the laptop connects to before running the usbip-win2 client. These
 // are the factory DEFAULTS only — the live SSID/password are stored in NVS and
 // editable from the web UI (Settings tab). Default password is empty = OPEN AP.
 // A WPA2 password, if set, must be >= 8 characters.
-#define AP_SSID     "IgnitronUSB"
+#define AP_SSID     "usb2ip"
 #define AP_PASSWORD ""            // empty = open network (no password)
 
 // Soft-AP 2.4 GHz channel — factory DEFAULT only; the live value is stored in
@@ -69,25 +71,34 @@
 #define PIN_USB_DPLUS  20   // D+  (ESP_IGNITRON_D+)
 
 // ---------------------------------------------------------------------------
-// Board I/O — USB routing + ECU 5V power control (schematic V1.0)
+// Board I/O — USB routing + ECU 5V power control (schematic rev3+)
 //
 //   GPIO4  ESP_LED       status LED (active-HIGH: pin HIGH = lit)
 //   GPIO5  USB_OE        FSUSB42 /OE  — HIGH = mux Hi-Z (USB-A floating/off)
 //   GPIO6  USB_SEL       FSUSB42 SEL  — LOW = ESP host, HIGH = laptop (USB-C)
-//   GPIO7  IGNITRON_PWR  ECU 5V PMOS gate — OPEN-DRAIN ACTIVE-LOW (see below)
-//   GPIO8  VBUS_SENSE    USB-C VBUS present (Schmitt-buffered) — HIGH = C plugged
+//   GPIO7  IGNITRON_PWR  TPS2041B EN# — ACTIVE-LOW, R19 10k pull-up to 3V3
+//   GPIO8  VBUS_SENSE    USB-C VBUS present (LVC1G17, R11 10k bleed) — HIGH = C plugged
+//   GPIO16 IGNITRON_OC   TPS2041B OC# — open-drain, R20 10k pull-up — LOW = fault
 //
-// IGNITRON_PWR drives an AO3401A PMOS gate that has a 100k pull-up to +5V:
-//   * Enable  ECU 5V : pinMode(OUTPUT) + digitalWrite(LOW) → gate low, PMOS on.
-//   * Disable ECU 5V : pinMode(INPUT)  (Hi-Z)              → gate floats to +5V, off.
-//   * NEVER drive it HIGH (3.3V) — that only partially turns the PMOS on and
-//     makes it dissipate heat. Hi-Z (INPUT) is the safe "off".
+// IGNITRON_PWR drives the EN# pin of U10 (TPS2041BDBVR, 0.5 A current-limited
+// USB power switch, +5V → IGNITRON_5V; the red LED is on IGNITRON_5V):
+//   * Enable  ECU 5V : pinMode(OUTPUT) + digitalWrite(LOW) → EN# low, switch on.
+//   * Disable ECU 5V : pinMode(INPUT)  (Hi-Z)              → R19 pulls EN# high, off.
+//   Hi-Z is kept as "off" (rather than driving HIGH) so this firmware stays safe
+//   on a rev1 board, whose AO3401A PMOS half-conducts if the pin is driven 3.3 V.
+//   ecu_powered in /api/status is the COMMANDED state — the red LED (or a meter
+//   on IGNITRON_5V) is the only proof the port really has 5 V.
+//
+// IGNITRON_OC (OC#) asserts low on over-current (~0.7-1 A limit, ~8 ms deglitch)
+// or thermal shutdown. Read with the internal pull-up too, so an unconnected
+// pin (rev1 board) reads "no fault" rather than floating.
 // ---------------------------------------------------------------------------
 #define PIN_ESP_LED       4
 #define PIN_USB_OE        5
 #define PIN_USB_SEL       6
 #define PIN_IGNITRON_PWR  7
 #define PIN_VBUS_SENSE    8
+#define PIN_IGNITRON_OC   16
 
 // BOOT button (SW_BOOT → GPIO0, strapping pin, external pull-up). Hold it for
 // BOOT_FACTORY_MS (LED strobes = armed), release, then press again within
@@ -108,9 +119,10 @@
 #define MUX_SEL_ESP     LOW    // ECU D± ↔ ESP32 native USB host (WiFi bridge)
 #define MUX_SEL_LAPTOP  HIGH   // ECU D± ↔ USB-C (piggyback laptop, direct)
 
-// Auto power-down: after this long with no WiFi activity (no station associated
-// and no USB/IP client attached), the WiFi bridge AND the ECU 5V rail both cut,
-// so the ECU sees an unplugged host. USB-C insertion overrides / wakes it.
+// Auto power-down: after this long with no WiFi activity (no station associated,
+// no web request and no USB/IP client attached), the ECU 5V rail cuts and the
+// mux opens, so the ECU sees an unplugged host. The soft-AP stays up: the next
+// WiFi client (or a USB-C insertion) powers the port again.
 #define IDLE_SHUTDOWN_MS (5UL * 60UL * 1000UL)
 
 // Status LED — what the ESP is doing with the USB-A device:
@@ -118,13 +130,14 @@
 //   double blink   device connected, idle (two short flashes, long gap)
 //   fast blink     transferring / in use (URB traffic within LED_ACTIVE_MS)
 //   solid          device handed to the laptop over USB-C (ESP not hosting)
-//   off            asleep (idle power-down)
+//   heartbeat      standby — USB-A unpowered, waiting for USB-C or a WiFi client
+//                  (one 30 ms blip every 3 s)
 //   strobe         BOOT factory reset armed, awaiting the confirmation press
 #define LED_ACTIVE_MS 750        // "transferring" hold time after the last URB
 
 // Settings defaults (persisted in NVS, overridable from the web UI).
-// NOTE: on this PCB the VBUS-sense net is also fed by the programming/USB-C
-// port, so it reads present whenever the board is powered — keep WiFi up.
+// NOTE: VBUS is common to BOTH USB-C ports (programming + bridge), so
+// VBUS_SENSE reads present whenever either one is plugged in — keep WiFi up.
 #define DEFAULT_USBC_DISABLES_WIFI     0  // 0 = keep WiFi bridge up when VBUS present
 #define DEFAULT_RESTORE_WIFI_ON_UNPLUG 1  // restore WiFi bridge on USB-C removal
 #define DEFAULT_IDLE_AUTO_OFF          1  // 1 = 5-min idle power-down; 0 = stay powered

@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB — raw USB-frame tap.
+// usb2ip — raw USB-frame tap.
 //
 // Called from the USB/IP bridge on every ECU bulk transfer. Does two jobs
 // without ever blocking the forward path:

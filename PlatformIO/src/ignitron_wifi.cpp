@@ -406,7 +406,11 @@ void setupWebRoutes()
     port::Settings cfg = port::g_port.settings();
     JsonObject sys = doc["sys"].to<JsonObject>();
     sys["usbc"] = ps.usbc_present;
+    sys["vbusRaw"] = ps.vbus_raw;
     sys["ecuPwr"] = ps.ecu_powered;
+    sys["ecuFault"] = ps.ecu_fault;
+    sys["ecuFaults"] = ps.ecu_fault_count;
+    if (ps.ecu_fault_count) sys["ecuFaultAgo"] = ps.ecu_fault_ago_ms;
     sys["wifiOn"] = ps.wifi_on;
     sys["wifiUse"] = ps.wifi_in_use;
     sys["asleep"] = ps.asleep;
@@ -920,7 +924,7 @@ void setupWebRoutes()
     st->f = LittleFS.open(path, FILE_READ);
     uint8_t hdr[12];
     if (!st->f || st->f.read(hdr, 12) != 12 || memcmp(hdr, "IGLG", 4) != 0) {
-      request->send(500, "text/plain", "not an IgnitronUSB log"); return;
+      request->send(500, "text/plain", "not a usb2ip log"); return;
     }
     st->rate = hdr[5];
     st->nch = hdr[6] | (hdr[7] << 8);
@@ -993,7 +997,7 @@ void setupWebRoutes()
   server.on("/api/params", HTTP_GET, [](AsyncWebServerRequest *request)
             {
     JsonDocument doc;
-    doc["format"] = "ignitronusb-params";
+    doc["format"] = "usb2ip-params";
     doc["version"] = 1;
     doc["fw"] = FW_VERSION;
     JsonObject g = doc["dashboard"].to<JsonObject>();
@@ -1015,7 +1019,7 @@ void setupWebRoutes()
     lg["rate"] = logger::rate_hz();
     String out; serializeJsonPretty(doc, out);
     AsyncWebServerResponse *res = request->beginResponse(200, "application/json", out);
-    res->addHeader("Content-Disposition", "attachment; filename=\"ignitronusb-params.json\"");
+    res->addHeader("Content-Disposition", "attachment; filename=\"usb2ip-params.json\"");
     request->send(res); });
 
   // POST /api/params with the JSON body from an export.
@@ -1026,8 +1030,8 @@ void setupWebRoutes()
       JsonDocument doc;
       DeserializationError e = deserializeJson(doc, *body);
       delete body; request->_tempObject = nullptr;
-      if (e || doc["format"] != "ignitronusb-params") {
-        request->send(400, "application/json", "{\"ok\":false,\"err\":\"not an IgnitronUSB parameters file\"}");
+      if (e || (doc["format"] != "usb2ip-params" && doc["format"] != "ignitronusb-params")) { // pre-1.0 exports still import
+        request->send(400, "application/json", "{\"ok\":false,\"err\":\"not a usb2ip parameters file\"}");
         return;
       }
       int applied = 0, skipped = 0;
@@ -1093,7 +1097,7 @@ void setupUI()
   // tuning have no equivalent in the shared module.
   wifimgr_config_t wcfg = wifiDefaultConfig();
   wcfg.hostName  = AP_SSID;
-  wcfg.mdnsName  = "ignitron";  // -> http://ignitron.local
+  wcfg.mdnsName  = "usb2ip";    // -> http://usb2ip.local
   wcfg.fwVersion = FW_VERSION;  // recovery page only; index.html bakes its own
   wcfg.manageAp  = false;
   // MUST precede wifiManagerInit(): that mounts the web-UI filesystem via
@@ -1101,7 +1105,7 @@ void setupUI()
   // mount passes silently.
   ota_config_t ocfg = otaDefaultConfig();
   ocfg.fwVersion  = FW_VERSION;
-  ocfg.product    = "Ignitron USB";
+  ocfg.product    = "usb2ip";
   ocfg.githubRepo = "adamforbes92/usb2ip"; // Releases/ + releases.json for "Check for updates"
   ocfg.verbose    = true;       // routed through the [OTA] serial tag
   otaManagerInit(&ocfg);

@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB — data logger.
+// usb2ip — data logger.
 //
 // Logs any subset of the ECU's 384 live channels, independent of the
 // dashboard's 16-dial display cap. Two ways to use it:

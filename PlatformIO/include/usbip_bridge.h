@@ -1,6 +1,6 @@
 #pragma once
 
-// IgnitronUSB: USB/IP-over-WiFi bridge core.
+// usb2ip: USB/IP-over-WiFi bridge core.
 // Ported from tiehfood/esphome-usbip-printer (GPL-3.0) — ESPHome/printer
 // specifics removed, generic vendor-USB device support retained. See LICENSE.
 //

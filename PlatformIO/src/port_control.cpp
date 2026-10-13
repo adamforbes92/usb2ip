@@ -15,16 +15,24 @@ PortController g_port;
 
 static Preferences s_prefs;
 
+// OC# falling edges. The TPS2041B current-limits and thermal-cycles, so OC#
+// can pulse low for only ~10s of ms — shorter than the 50 ms poll. The ISR
+// counts every assertion so none goes unreported.
+static volatile uint32_t s_oc_edges = 0;
+static void IRAM_ATTR oc_isr() { s_oc_edges++; }
+
 // --- low-level pin actions ------------------------------------------------
 
 void PortController::ecu_power(bool on) {
+  if (on == ecu_powered_) return;
   if (on) {
     pinMode(PIN_IGNITRON_PWR, OUTPUT);
-    digitalWrite(PIN_IGNITRON_PWR, LOW);   // open-drain LOW → PMOS fully on
+    digitalWrite(PIN_IGNITRON_PWR, LOW);   // EN# low → TPS2041B on
   } else {
-    pinMode(PIN_IGNITRON_PWR, INPUT);      // Hi-Z → gate floats to +5V → off
+    pinMode(PIN_IGNITRON_PWR, INPUT);      // Hi-Z → R19 pulls EN# high → off
   }
   ecu_powered_ = on;
+  DEBUG_PWR("ECU 5V %s", on ? "ON" : "OFF");
 }
 
 void PortController::mux(MuxMode mode) {
@@ -62,7 +70,48 @@ bool PortController::compute_wifi_in_use() {
   return usbip::g_usbip_component && usbip::g_usbip_component->client_attached();
 }
 
+bool PortController::read_vbus() {
+  vbus_raw_ = digitalRead(PIN_VBUS_SENSE) == HIGH;
+  return vbus_raw_;
+}
+
+// TPS2041B OC# (active-low). Only meaningful while the switch is enabled.
+void PortController::check_fault() {
+  uint32_t edges = s_oc_edges;
+  if (edges != fault_count_) {
+    uint32_t n = edges - fault_count_;
+    fault_count_ = edges;
+    last_fault_ms_ = millis();
+    DEBUG_PWR("ECU 5V over-current event%s (+%lu, %lu since boot)",
+              n > 1 ? "s" : "", (unsigned long)n, (unsigned long)edges);
+  }
+  bool f = ecu_powered_ && digitalRead(PIN_IGNITRON_OC) == LOW;
+  if (f != fault_) {
+    fault_ = f;
+    if (f) DEBUG_PWR("ECU 5V FAULT — TPS2041B OC# low (over-current / thermal limit on USB-A)");
+    else   DEBUG_PWR("ECU 5V fault cleared");
+  }
+}
+
 // --- stage transitions ----------------------------------------------------
+
+// Power the port and route it. The destination is the forced route if one is
+// pinned, otherwise the laptop when USB-C is present, else the ESP host.
+// Power first, then data — the same order a real plug makes contact in.
+void PortController::enter_active(uint32_t now, bool usbc) {
+  bool to_laptop = route_mode_ == RouteMode::USBC ||
+                   (route_mode_ == RouteMode::AUTO && usbc);
+  asleep_ = false;
+  ecu_power(true);
+  if (to_laptop) {
+    mux(MuxMode::LAPTOP);
+    if (cfg_.usbc_disables_wifi) wifi(false);
+  } else {
+    mux(MuxMode::ESP_HOST);
+    wifi(true);
+  }
+  last_activity_ms_ = now;   // arm / restart the 5-minute idle window
+}
 
 void PortController::enter_active_esp(uint32_t now) {
   asleep_ = false;
@@ -71,27 +120,14 @@ void PortController::enter_active_esp(uint32_t now) {
   last_activity_ms_ = now;   // arm / restart the 5-minute idle window
 }
 
-// Pin the ECU to a fixed destination, ignoring VBUS sense.
-void PortController::apply_forced_route(uint32_t now) {
-  asleep_ = false;
-  ecu_power(true);
-  if (route_mode_ == RouteMode::USBC) {
-    mux(MuxMode::LAPTOP);
-    if (cfg_.usbc_disables_wifi) wifi(false);
-  } else {  // RouteMode::WIFI
-    mux(MuxMode::ESP_HOST);
-    wifi(true);
-  }
-  last_activity_ms_ = now;
-}
-
-void PortController::enter_sleep() {
-  DEBUG_PWR("idle %lus — WiFi bridge + ECU 5V off (ECU sees unplug)",
-            (unsigned long)(IDLE_SHUTDOWN_MS / 1000));
-  wifi(false);
-  ecu_power(false);
+// Standby: USB-A unpowered and disconnected; the AP stays up so a WiFi client
+// can wake it. Data first, then power — the order a real unplug breaks in.
+void PortController::enter_standby(const char *why) {
+  DEBUG_PWR("standby (%s) — ECU 5V off, USB-A open, waiting for USB-C or a WiFi client", why);
   mux(MuxMode::OFF);
+  ecu_power(false);
   asleep_ = true;
+  fault_ = false;
 }
 
 // --- lifecycle ------------------------------------------------------------
@@ -108,36 +144,36 @@ void PortController::begin() {
   pinMode(PIN_ESP_LED, OUTPUT);
   digitalWrite(PIN_ESP_LED, LOW);
   pinMode(PIN_VBUS_SENSE, INPUT);
+  pinMode(PIN_IGNITRON_OC, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_IGNITRON_OC), oc_isr, FALLING);
   pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
+  pinMode(PIN_IGNITRON_PWR, INPUT);          // EN# Hi-Z → port off
+  ecu_powered_ = false;
   pinMode(PIN_USB_OE, OUTPUT);
   digitalWrite(PIN_USB_OE, HIGH);            // start disconnected
   pinMode(PIN_USB_SEL, OUTPUT);
   digitalWrite(PIN_USB_SEL, MUX_SEL_ESP);
+  mux_ = MuxMode::OFF;
 
-  bool usbc = digitalRead(PIN_VBUS_SENSE) == HIGH;
+  bool usbc = read_vbus();
   usbc_prev_ = usbc;
   vbus_filter_ = usbc ? 4 : 0;
 
   uint32_t now = millis();
-  if (route_mode_ != RouteMode::AUTO) {
-    // Manual override pinned in NVS — enforce it, ignore VBUS.
-    apply_forced_route(now);
-  } else if (usbc) {
-    // Booted with a laptop already on USB-C → hand the ECU straight to it.
-    asleep_ = false;
-    ecu_power(true);
-    mux(MuxMode::LAPTOP);
-    if (cfg_.usbc_disables_wifi) wifi(false);
-    last_activity_ms_ = now;
-  } else {
-    // Normal boot: ESP hosts the ECU, WiFi bridge already up (from main).
-    enter_active_esp(now);
-  }
-
   last_poll_ms_ = now;
   led_last_ms_ = now;
-  DEBUG_PWR("port control up — usbc=%d, ecu=%d, mux=%d, route=%d",
-            usbc, ecu_powered_, (int)mux_, (int)route_mode_);
+  DEBUG_PWR("port control up — vbus=%d, route=%d (0 auto, 1 usbc, 2 wifi)",
+            usbc, (int)route_mode_);
+
+  // Never power the port just because the board powered up. A USB-C host
+  // already present at boot IS a request (unless WiFi is the pinned route);
+  // otherwise wait in standby for loop() to see USB-C or a WiFi client.
+  if (usbc && route_mode_ != RouteMode::WIFI) {
+    DEBUG_PWR("USB-C present at boot → port on");
+    enter_active(now, true);
+  } else {
+    enter_standby("boot");
+  }
 }
 
 void PortController::loop() {
@@ -148,46 +184,55 @@ void PortController::loop() {
   last_poll_ms_ = now;
 
   check_boot_button(now);
-
-  // Manual override: routing is pinned, VBUS auto-switch + idle sleep disabled.
-  if (route_mode_ != RouteMode::AUTO) {
-    wifi_in_use_ = compute_wifi_in_use();
-    last_activity_ms_ = now;
-    return;
-  }
+  check_fault();
 
   // Debounced USB-C presence (needs 4 consistent samples to flip either way).
-  bool raw = digitalRead(PIN_VBUS_SENSE) == HIGH;
+  // Always tracked for the status page; only acted on in AUTO (+ standby wake
+  // for a pinned USB-C route).
+  bool raw = read_vbus();
   if (raw && vbus_filter_ < 4) vbus_filter_++;
   if (!raw && vbus_filter_ > 0) vbus_filter_--;
   bool usbc = usbc_prev_;
   if (vbus_filter_ >= 4) usbc = true;
   if (vbus_filter_ == 0) usbc = false;
-
-  if (usbc && !usbc_prev_) {
-    // Stage 2 — USB-C inserted.
-    DEBUG_PWR("USB-C connected → mux to laptop%s",
-              cfg_.usbc_disables_wifi ? ", WiFi bridge off" : "");
-    asleep_ = false;
-    ecu_power(true);
-    mux(MuxMode::LAPTOP);
-    if (cfg_.usbc_disables_wifi) wifi(false);
-  } else if (!usbc && usbc_prev_) {
-    // Stage 3 — USB-C removed.
-    DEBUG_PWR("USB-C removed → mux to ESP host%s",
-              cfg_.restore_wifi_on_unplug ? ", WiFi bridge restored" : "");
-    enter_active_esp(now);
-    if (cfg_.restore_wifi_on_unplug) wifi(true);
-  }
+  bool inserted = usbc && !usbc_prev_;
+  bool removed  = !usbc && usbc_prev_;
   usbc_prev_ = usbc;
+
+  if (route_mode_ == RouteMode::AUTO) {
+    if (inserted) {
+      // Stage 2 — USB-C inserted.
+      DEBUG_PWR("USB-C connected → port on, mux to laptop%s",
+                cfg_.usbc_disables_wifi ? ", WiFi bridge off" : "");
+      enter_active(now, true);
+    } else if (removed) {
+      // Stage 3 — USB-C removed. A WiFi client still connected keeps the port
+      // powered and takes it over (no power blip); otherwise back to standby.
+      DEBUG_PWR("USB-C removed%s", cfg_.restore_wifi_on_unplug ? ", WiFi bridge restored" : "");
+      if (cfg_.restore_wifi_on_unplug) wifi(true);
+      if (compute_wifi_in_use()) enter_active(now, false);
+      else                       enter_standby("USB-C removed");
+    }
+  }
 
   wifi_in_use_ = compute_wifi_in_use();
 
-  if (usbc) {                 // laptop present → never auto power-down
+  if (asleep_) {
+    // Standby — power up only on a request: a WiFi client, or USB-C (a pinned
+    // WiFi route ignores VBUS).
+    bool usbc_req = usbc && route_mode_ != RouteMode::WIFI;
+    if (wifi_in_use_ || usbc_req) {
+      DEBUG_PWR("request (%s) → port on", usbc_req ? "USB-C" : "WiFi client");
+      enter_active(now, usbc);
+    }
+    return;
+  }
+
+  // Forced route, or laptop present → hold powered, never auto power-down.
+  if (route_mode_ != RouteMode::AUTO || usbc) {
     last_activity_ms_ = now;
     return;
   }
-  if (asleep_) return;        // already down; USB-C insertion is the wake source
 
   // Stage 4 — idle watchdog. Disabled → hold the ECU powered indefinitely.
   if (!cfg_.idle_auto_off) {
@@ -195,7 +240,7 @@ void PortController::loop() {
     return;
   }
   if (wifi_in_use_) last_activity_ms_ = now;
-  if (now - last_activity_ms_ >= IDLE_SHUTDOWN_MS) enter_sleep();
+  if (now - last_activity_ms_ >= IDLE_SHUTDOWN_MS) enter_standby("idle 5 min");
 }
 
 // --- status LED -----------------------------------------------------------
@@ -204,24 +249,25 @@ static const uint16_t kLedSlow[]   = {150, 1350};                 // no device
 static const uint16_t kLedDouble[] = {120, 150, 120, 1200};       // device idle
 static const uint16_t kLedFast[]   = {80, 80};                    // transferring
 static const uint16_t kLedStrobe[] = {40, 40};                    // reset armed
+static const uint16_t kLedStandby[] = {30, 2970};                 // standby heartbeat
 
 void PortController::update_led(uint32_t now) {
   const uint16_t *pat = nullptr;
   uint8_t len = 0;
-  bool solid = false, off = false;
+  bool solid = false;
 
   bool dev_present = usbip::g_usbip_component && usbip::g_usbip_component->device_info().present;
   bool xfer = usbip::g_usbip_component && usbip::g_usbip_component->active_within(LED_ACTIVE_MS);
   bool laptop = (mux_ == MuxMode::LAPTOP);
 
   if (boot_armed_)      { pat = kLedStrobe; len = 2; }
-  else if (asleep_)     { off = true; }
+  else if (asleep_)     { pat = kLedStandby; len = 2; }
   else if (laptop)      { solid = true; }
   else if (xfer)        { pat = kLedFast; len = 2; }
   else if (dev_present) { pat = kLedDouble; len = 4; }
   else                  { pat = kLedSlow; len = 2; }
 
-  if (off || solid) {
+  if (solid) {
     led_pat_ = nullptr;
     if (led_on_ != solid) { led_on_ = solid; digitalWrite(PIN_ESP_LED, solid ? HIGH : LOW); }
     return;
@@ -311,13 +357,17 @@ void PortController::check_boot_button(uint32_t now) {
 Status PortController::status() {
   Status st{};
   st.usbc_present = usbc_prev_;
+  st.vbus_raw = vbus_raw_;
   st.ecu_powered = ecu_powered_;
+  st.ecu_fault = fault_;
+  st.ecu_fault_count = fault_count_;
+  st.ecu_fault_ago_ms = fault_count_ ? millis() - last_fault_ms_ : UINT32_MAX;
   st.wifi_on = wifiBridgeActive();
   st.wifi_in_use = wifi_in_use_;
   st.asleep = asleep_;
   st.mux = mux_;
   st.route = route_mode_;
-  if (asleep_ || usbc_prev_) {
+  if (asleep_ || usbc_prev_ || route_mode_ != RouteMode::AUTO) {
     st.idle_remaining_ms = 0;
   } else if (!cfg_.idle_auto_off) {
     st.idle_remaining_ms = 0;   // held powered — no countdown
@@ -335,35 +385,27 @@ void PortController::set_settings(const Settings &s) {
   s_prefs.putBool("idleOff", cfg_.idle_auto_off);
   DEBUG_PWR("settings: usbcDisablesWifi=%d restoreWifiOnUnplug=%d idleAutoOff=%d",
             cfg_.usbc_disables_wifi, cfg_.restore_wifi_on_unplug, cfg_.idle_auto_off);
-  // Applying "stay powered" mid-idle should wake immediately if already asleep.
-  if (!cfg_.idle_auto_off && asleep_ && route_mode_ == RouteMode::AUTO)
-    enter_active_esp(millis());
+  // No wake here: the settings POST came from a web client, which loop()
+  // already counts as a request.
 }
 
 void PortController::wake() {
-  DEBUG_PWR("manual wake — re-power ECU + restart idle window");
+  DEBUG_PWR("manual wake — power ECU → ESP host + restart idle window");
   enter_active_esp(millis());
   wifi(true);
 }
 
+// Choosing a route in the UI is an explicit request, so it applies now.
 void PortController::set_route_override(RouteMode m) {
   route_mode_ = m;
   s_prefs.putUChar("route", (uint8_t)m);
   DEBUG_PWR("route override = %d", (int)m);
-  uint32_t now = millis();
-  if (m == RouteMode::AUTO) {
-    // Re-sync to VBUS immediately, then let loop() resume auto switching.
-    bool usbc = digitalRead(PIN_VBUS_SENSE) == HIGH;
-    vbus_filter_ = usbc ? 4 : 0;
-    usbc_prev_ = usbc;
-    asleep_ = false;
-    ecu_power(true);
-    mux(usbc ? MuxMode::LAPTOP : MuxMode::ESP_HOST);
-    wifi(true);
-    last_activity_ms_ = now;
-  } else {
-    apply_forced_route(now);
-  }
+  // Re-sync to VBUS immediately so loop() doesn't see a stale edge.
+  bool usbc = read_vbus();
+  vbus_filter_ = usbc ? 4 : 0;
+  usbc_prev_ = usbc;
+  enter_active(millis(), usbc);
+  if (m == RouteMode::AUTO) wifi(true);
 }
 
 }  // namespace port

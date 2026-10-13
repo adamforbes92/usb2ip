@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="theme-color" content="#0b0f14" />
-  <title>IgnitronUSB — Live Gauges</title>
-  <link rel="stylesheet" href="/style.css?v=0.6" />
+  <title>usb2ip — Live Gauges</title>
+  <link rel="stylesheet" href="/style.css?v=1.0" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">IgnitronUSB</div>
+    <div class="brand">usb2ip</div>
     <div class="launch">
       <button id="launchGauges" class="btn primary">Launch Gauges</button>
       <span id="launchMsg" class="msg"></span>
@@ -162,7 +162,7 @@
           logging channel set and rate &mdash; to a small JSON file. Import applies one, so a setup
           can be moved between boards or kept as a backup.</p>
         <div class="actions">
-          <a id="paramsExport" class="btn" href="/api/params" download="ignitronusb-params.json">Export parameters</a>
+          <a id="paramsExport" class="btn" href="/api/params" download="usb2ip-params.json">Export parameters</a>
           <button id="paramsImportBtn" class="btn">Import parameters&hellip;</button>
           <input type="file" id="paramsImport" accept="application/json,.json" hidden />
           <span id="paramsMsg" class="msg"></span>
@@ -214,7 +214,8 @@
         <p class="hint">VBUS auto-detect is unreliable on this board, so pick where the
           ECU (USB-A) is connected. <strong>Auto</strong> follows USB-C detection;
           <strong>USB-C</strong> forces the laptop route; <strong>WiFi</strong> forces the
-          on-board bridge. Forced routes stay powered (no idle shutdown).</p>
+          on-board bridge. Forced routes stay powered (no idle shutdown) once on; after a
+          reboot the port still waits, unpowered, for USB-C or a WiFi client.</p>
         <div class="seg" id="routeSeg" role="group" aria-label="USB route">
           <button class="seg-btn" data-route="auto">Auto</button>
           <button class="seg-btn" data-route="usbc">USB-C</button>
@@ -237,7 +238,7 @@
 
       <div class="card danger-card">
         <h2>Factory reset</h2>
-        <p class="hint">Restore defaults: open AP <code>IgnitronUSB</code> with no password, at
+        <p class="hint">Restore defaults: open AP <code>usb2ip</code> with no password, at
           <code>192.168.1.1</code>. From the board: hold <strong>BOOT</strong> for 3&nbsp;s until the
           LED strobes, release, then press it again.</p>
         <div class="actions">
@@ -411,11 +412,11 @@
     </section>
   </main>
 
-  <!-- 0.6 is substituted by wifi_manager when it serves index.html;
+  <!-- 1.0 is substituted by wifi_manager when it serves index.html;
        assets are also served no-cache (ETag), so a same-version rebuild is
        never stale either -->
-  <script src="/faults.js?v=0.6"></script>
-  <script src="/app.js?v=0.6"></script>
-  <script src="/ota.js?v=0.6"></script>
+  <script src="/faults.js?v=1.0"></script>
+  <script src="/app.js?v=1.0"></script>
+  <script src="/ota.js?v=1.0"></script>
 </body>
 </html>

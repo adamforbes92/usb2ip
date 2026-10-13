@@ -74,13 +74,15 @@ static void statusTask(void *)
     ecu::TelemetryState st = ecu::g_telemetry.snapshot();
     port::Status ps = port::g_port.status();
     DEBUG("clients=%d heap=%u min=%u blk=%u | ECU link=%d frames=%lu in=%luB out=%luB drop=%lu cap=%d"
-          " | usbc=%d ecu5v=%d wifi=%d mux=%d idle=%lus",
+          " | usbc=%d(raw %d) route=%d ecu5v=%d oc=%d(%lu) standby=%d wifi=%d mux=%d idle=%lus",
           WiFi.softAPgetStationNum(), (unsigned)ESP.getFreeHeap(),
           (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
           st.link_ok, (unsigned long)st.frame_count,
           (unsigned long)ts.in_bytes, (unsigned long)ts.out_bytes,
           (unsigned long)ts.dropped, ts.client_connected,
-          ps.usbc_present, ps.ecu_powered, ps.wifi_on, (int)ps.mux,
+          ps.usbc_present, ps.vbus_raw, (int)ps.route, ps.ecu_powered, ps.ecu_fault,
+          (unsigned long)ps.ecu_fault_count,
+          ps.asleep, ps.wifi_on, (int)ps.mux,
           (unsigned long)(ps.idle_remaining_ms / 1000));
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
@@ -88,7 +90,7 @@ static void statusTask(void *)
 
 void startTasks()
 {
-  DEBUG("IgnitronUSB v%s booting", FW_VERSION);
+  DEBUG("usb2ip v%s booting", FW_VERSION);
   DEBUG("last reset: %s", resetReasonStr(esp_reset_reason()));
   crumb::report_after_reset();
 
