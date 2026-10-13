@@ -1,10 +1,10 @@
-# IgnitronUSB
+# ⚡ usb2ip
 
 **A wireless USB/IP bridge and live-gauge dashboard for an aftermarket ECU — powered by an ESP32-S3.**
 
-IgnitronUSB lets a Windows device talk to a USB ECU (*designed for Ignitron*) **over WiFi** using the
-standard [USB/IP](https://usbip.sourceforge.net/) protocol — so that there is no cable to the car
-required.  The built-in web dashboard shows live engine gauges, just like Ignitron would. When you *do*
+usb2ip lets a Windows device talk to a USB ECU (*Ignitron*) **over WiFi** using the
+standard [USB/IP](https://usbip.sourceforge.net/) protocol — no cable to the car
+required.  The built-in web dashboard shows live engine gauges. When you *do*
 want a wired connection, plug a USB-C cable into the piggyback port and the board
 hands the ECU straight to your laptop, automatically stepping the WiFi bridge out
 of the way. 
@@ -12,33 +12,34 @@ of the way.
 An automotive-grade buck supply runs the whole thing from the car, and
 a 5-minute idle timer powers everything down so nothing is left energised.
 
-![IgnitronUSB Web UI — dashboard, gauges, WiFi, diagnostics, USB capture, fault codes, data logger and OTA](/Images/ignitronUI.png)
+![usb2ip Web UI — dashboard, gauges, WiFi, diagnostics, USB capture, fault codes, data logger and OTA](/Images/ignitronUI.png)
 
-![IgnitronUSB Web UI — Arrange as Type, USB routing and logs on the board](/Images/ignitronUI-2.png)
+![usb2ip Web UI — Arrange as Type, USB routing and logs on the board](/Images/ignitronUI-2.png)
 
 ---
 
-## Features
+## ✨ Features
 
-- **Wireless USB/IP bridge** — the ESP32-S3 hosts the ECU on its native USB and
+- 📡 **Wireless USB/IP bridge** — the ESP32-S3 hosts the ECU on its native USB and
   exports it over a self-contained WiFi soft-AP on TCP `3240`. Attach it on the
   laptop with `usbip` / `usbip-win2`.
-- **Piggyback USB-C Passthrough** — plug a laptop into the USB-C port and an
+- 🔌 **Piggyback USB-C Passthrough** — plug a laptop into the USB-C port and an
   FSUSB42 chip routes the ECU directly to the laptop at full-speed.
-- **Live Web Gauges** — a dark, phone-friendly dashboard served straight from the
+- 📊 **Live Web Gauges** — a dark, phone-friendly dashboard served straight from the
   ESP32 over WiFi. Any of the ECU's 384 channels, named and scaled exactly as
-  Ignitron's own log viewer shows them.
-- **Automatic USB Switching** — senses USB-C insertion/removal and automatically switches between ESP and USB-C.
-- **5-minute idle shutdown** — with no WiFi activity, the bridge and the ECU 5V
-  rail both turn off, so the ECU sees an unplugged host and shuts down.
-- **Status LED** — at a glance: slow flash = nothing on USB-A, double blink =
+  Ignitron's own log viewer shows them (the catalogue is extracted from
+  `Ignitron.exe`, and the wire layout is verified byte-for-byte against a real log).
+- 🧠 **Automatic USB Switching** — senses USB-C insertion/removal and automatically switches between ESP and USB-C.
+- 💤 **5-minute idle shutdown** — with no WiFi activity, the bridge and the ECU 5V
+  rail both cut, so the ECU sees an unplugged host and draws nothing.
+- 🩺 **Status LED** — at a glance: slow flash = nothing on USB-A, double blink =
   device connected and idle, fast blink = transferring, solid = handed to USB-C.
-- **Raw frame tap** — a second TCP port (or the dashboard) records every raw ECU
+- 🛠️ **Raw frame tap** — a second TCP port (or the dashboard) records every raw ECU
   transfer, the same format the `tools/` scripts read.
 
 ---
 
-## Hardware
+## 🔧 Hardware
 
 Custom ESP32-S3 board (WROOM-1-N16, no PSRAM). Power comes from the car through an
 input-protected buck (TPS62933, 6.5–24 V → 5 V) and an AMS1117 3.3 V LDO. The ECU
@@ -53,17 +54,21 @@ e-fuses.
 | **4**  | `ESP_LED`      | out | Status LED (active-HIGH) |
 | **5**  | `USB_OE`       | out | FSUSB42 `/OE` — HIGH = mux Hi-Z (USB-A floating) |
 | **6**  | `USB_SEL`      | out | FSUSB42 `SEL` — LOW = ESP host, HIGH = laptop (USB-C) |
-| **7**  | `IGNITRON_PWR` | out | ECU 5V PMOS gate — **open-drain active-LOW** |
-| **8**  | `VBUS_SENSE`   | in  | USB-C VBUS present (Schmitt-buffered), HIGH = C plugged |
+| **7**  | `IGNITRON_PWR` | out | TPS2041B `EN#` (ECU 5V switch) — **active-LOW**, 10 k pull-up = off |
+| **8**  | `VBUS_SENSE`   | in  | USB-C VBUS present (LVC1G17 buffered), HIGH = C plugged — shared by **both** USB-C ports |
+| **16** | `IGNITRON_OC`  | in  | TPS2041B `OC#` — LOW = over-current / thermal fault on USB-A |
 | **19** | `ESP_IGNITRON_D-` | — | Native USB D− to ECU (via mux) |
 | **20** | `ESP_IGNITRON_D+` | — | Native USB D+ to ECU (via mux) |
 | **43** | `TXD0` | out | Serial console TX → CH340 RX |
 | **44** | `RXD0` | in  | Serial console RX ← CH340 TX |
 
-> ⚠️ **`IGNITRON_PWR` (GPIO7) is open-drain active-LOW.** Its PMOS gate has a 100 kΩ
-> pull-up to +5 V. Firmware enables the rail with `OUTPUT` + `LOW`, and disables it
-> by returning the pin to `INPUT` (Hi-Z) so the gate floats to +5 V. **Never drive it
-> HIGH** — 3.3 V only partially turns the PMOS on. Reset default (Hi-Z) = ECU off.
+> ⚠️ **`IGNITRON_PWR` (GPIO7) is active-LOW.** It drives the `EN#` pin of the
+> TPS2041B (U10) USB power switch, which has a 10 kΩ pull-up to 3V3. Firmware enables
+> the rail with `OUTPUT` + `LOW` and disables it by returning the pin to `INPUT`
+> (Hi-Z). Reset default (Hi-Z) = ECU off. Hi-Z rather than HIGH is kept so the same
+> firmware stays safe on a rev1 board (AO3401A PMOS, which half-conducts at 3.3 V).
+> The web UI's "ECU 5V On" is the *commanded* state; the red LED on `IGNITRON_5V`
+> shows whether the port actually has 5 V.
 
 ### Data mux truth table (FSUSB42)
 
@@ -90,8 +95,6 @@ auto-reset network (DTR → Q1 → `EN`, RTS → Q2 → `IO0`, MMBT3904 + 10 kΩ
 > (4.7 kΩ pin 6 → GND selects "open-source" `DTR#`, idle-LOW — wrong for this
 > circuit; only use with a direct DTR→IO0 hookup.) Un-NC `CTS#` on the next rev.
 
-Rev1 boards will need their RST/BOOT buttons pressed to launch boot.
-
 Pressing RESET makes the status LED drop out / glow faintly while held — that's
 just GPIO4 floating during reset, not a fault.
 
@@ -100,16 +103,17 @@ Refs: [CH340 datasheet (CH340DS1)](https://cdn.sparkfun.com/assets/5/0/a/8/5/CH3
 
 ---
 
-## How it works — the four stages
+## 🧭 How it works — the four stages
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Boot
-    Boot --> ESP_Host: ECU 5V on, mux→ESP,\nWiFi up, 5-min timer started
-    ESP_Host --> Laptop: USB-C inserted (VBUS_SENSE)\nmux→laptop, WiFi off*
-    Laptop --> ESP_Host: USB-C removed\nmux→ESP, WiFi restored*, timer reset
-    ESP_Host --> Sleep: 5 min, no WiFi activity\nWiFi off + ECU 5V off
-    Sleep --> Laptop: USB-C inserted (wake)
+    [*] --> Standby: boot — ECU 5V off,\nmux open, WiFi AP up
+    Standby --> ESP_Host: WiFi client appears\nECU 5V on, mux→ESP, 5-min timer
+    Standby --> Laptop: USB-C inserted (VBUS_SENSE)\nECU 5V on, mux→laptop, WiFi off*
+    ESP_Host --> Laptop: USB-C inserted\nmux→laptop, WiFi off*
+    Laptop --> ESP_Host: USB-C removed, WiFi client present\nWiFi restored*, timer reset
+    Laptop --> Standby: USB-C removed, no WiFi client
+    ESP_Host --> Standby: 5 min, no WiFi activity\nECU 5V off, mux open
     note right of ESP_Host
         * optional, toggled in the web UI
     end note
@@ -117,13 +121,15 @@ stateDiagram-v2
 
 | Stage | Trigger | Board does |
 |------:|---------|------------|
-| **0 — Boot** | Power applied from the car | ECU 5V **on**, mux → **ESP host**, WiFi bridge **up**, 5-min idle timer armed |
-| **1 — Bridge** | Laptop joins the WiFi AP / attaches USB/IP | ESP hosts the ECU and exports it over WiFi; idle timer keeps resetting while in use |
-| **2 — USB-C in** | Laptop plugged into USB-C (`VBUS_SENSE` HIGH) | Mux → **laptop**, ECU stays powered; WiFi bridge **off** *(optional)* |
-| **3 — USB-C out** | USB-C removed (`VBUS_SENSE` LOW) | Mux → **ESP host**; WiFi bridge **restored** *(optional)*; idle timer reset |
-| **4 — Idle** | 5 min with no WiFi activity | WiFi bridge **off** + ECU 5V **off** → ECU sees an unplugged host. USB-C wakes it |
+| **0 — Boot / standby** | Power applied from the car | ECU 5V **off**, mux **open** (USB-A floating), WiFi AP **up** — nothing is pushed onto the ECU's USB until something asks |
+| **1 — Bridge** | A WiFi client appears (joins the AP, opens the web UI, attaches USB/IP) | ECU 5V **on**, mux → **ESP host**; idle timer keeps resetting while in use |
+| **2 — USB-C in** | Laptop plugged into USB-C (`VBUS_SENSE` HIGH) | ECU 5V **on**, mux → **laptop**; WiFi bridge **off** *(optional)* |
+| **3 — USB-C out** | USB-C removed (`VBUS_SENSE` LOW) | WiFi bridge **restored** *(optional)*; WiFi client still present → mux → **ESP host**, otherwise back to **standby** |
+| **4 — Idle** | 5 min with no WiFi activity | ECU 5V **off** + mux **open** → ECU sees an unplugged host. AP stays up; the next WiFi client or USB-C wakes it |
 
-"WiFi activity" = a station associated to the soft-AP **or** a USB/IP client attached.
+"WiFi activity" = a station associated to the soft-AP, a web request in the last 30 s, **or** a USB/IP client attached.
+A **forced route** (USB-C / WiFi in the UI) only fixes *where* the ECU goes: after a reboot the
+port still waits in standby for a request, then holds powered (no idle shutdown).
 
 ### Status LED (GPIO4)
 
@@ -133,7 +139,7 @@ stateDiagram-v2
 | **Double blink** (two short, long gap) | Device connected, no traffic |
 | **Fast blink** | Transferring — USB/IP traffic in the last ¾ s |
 | **Solid** | Device handed to the laptop over USB-C (ESP not hosting) |
-| **Off** | Idle power-down (asleep) |
+| **Heartbeat** (30 ms blip every 3 s) | Standby — USB-A unpowered, waiting for USB-C or a WiFi client |
 | **Strobe** | BOOT held 3 s — factory reset armed, press again to confirm |
 
 ---
@@ -152,7 +158,7 @@ device, so you need the USB/IP client **and** that same driver bound to it.
    .\usbip.exe install           # run from the extracted release: installs vhci + cert
    ```
 
-2. **Join** the `IgnitronUSB` WiFi network (open by default — no password).
+2. **Join** the `usb2ip` WiFi network (open by default — no password).
 3. **List, then attach** the exported ECU:
 
    ```powershell
@@ -168,9 +174,9 @@ device, so you need the USB/IP client **and** that same driver bound to it.
 5. **Launch the Ignitron software** — it finds the ECU as if plugged in locally.
 6. **Detach** when done: `usbip detach -p 0`.
 
-## Using the WiFi bridge
+## 📶 Using the WiFi bridge
 
-1. Join the WiFi network **`IgnitronUSB`**. By default it is an **open** network
+1. Join the WiFi network **`usb2ip`**. By default it is an **open** network
    (no password). You can set an SSID and password later from the **Settings** tab.
 2. The board is at **`192.168.1.1`**.
 3. Attach the ECU on your laptop:
@@ -183,7 +189,7 @@ device, so you need the USB/IP client **and** that same driver bound to it.
 
 ### Supported USB devices
 
-The bridge is designed to be class-agnostic: whatever the ESP32-S3 full/low-speed host can
+The bridge is class-agnostic: whatever the ESP32-S3 full/low-speed host can
 enumerate is exported unchanged, and the driver on the laptop talks to it as if
 it were local. Verified transfer paths cover **mass storage**, **HID** (keyboards,
 mice — interrupt-IN URBs stay pending indefinitely, as the HID stack expects),
@@ -205,7 +211,7 @@ resubmitting any URB a driver keeps parked on the interface meanwhile.
 Limits: one device at a time, no isochronous endpoints (audio/video), at most
 7 data endpoints (DWC host-channel count), and IN URBs up to 64 KB.
 
-### The Ignitron Gauge Protocol
+### The gauge protocol — proven, not fitted
 
 Ignitron's PC software polls the ECU with one vendor control request and reads
 the answer from bulk-IN endpoint 1. Every poll cycle is two of these:
@@ -222,17 +228,29 @@ knock/lambda DSP's variables; the 704 B block is everything else.
 
 The channel catalogue itself — name, unit, decimals, multiplier, offset and
 dial range for all 384 channels, plus the 303 "status bit" definitions — is
-not reverse-engineered from data at all. 
+not reverse-engineered from data at all. It is read straight out of the
+installed `Ignitron.exe`, which carries it as a Windows string table
+(ID `6000 + channel`, plus `7000 + n` for `name, channel, bit`) and a
+`float[512][7]` table next to the code that formats values for the log viewer:
 
 ```
 engineering = (raw × mult + offset) / 10^decimals     raw = int16 if the display minimum < 0, else uint16
 ```
+
+`tools/verify_map.py` then checks the whole thing against a real session: a
+tapcap capture (`session1.bin`) and the Ignitron log recorded at the same time
+(`logs/Adam_Forbes_20260914_1842_.ilf`), paired sample-for-frame on the ECU's
+own frame counter (channel 347). Result:
 
 | channels | verdict |
 |---:|---|
 | 144 live | **bit-identical** to the logged value at every paired sample |
 | 236 constant | same constant on the wire |
 | 4 (32, 381, 382, 383) | computed by the PC into the log (AFR = λ × stoich, USB timing, timestamp); the ECU sends 0 |
+
+and the viewer's displayed values (`tools/ignitron_channels.txt`, transcribed
+at one cursor) reproduce from the log's raw values with the exe's table for
+every channel whose value wasn't jittering between samples.
 
 Regenerating the firmware table from scratch:
 
@@ -243,11 +261,11 @@ py tools/make_channel_map.py               # -> tools/channel_map.csv (keys, gro
 py tools/gen_gauges.py                     # -> include/gauges_table.h
 ```
 
-Caveats worth knowing: the Ignitron Software rewrites a few table rows at runtime from the
+Caveats worth knowing: the exe rewrites a few table rows at runtime from the
 loaded tune (the CAN torque channels are re-scaled to the tune's MDI torque
 value, user-defined sensors get their own calibration), so those rows carry the
 compile-time defaults; and the viewer converts km/h to mph when told to, the
-ECU always sends km/h.  Since these are within the executable, they are unknowns.
+ECU always sends km/h.
 
 ### Session handshake, tune reads and the "password protect" feature
 
@@ -343,7 +361,7 @@ timeline; `tools/ilf_parse.py` reads the Ignitron `.ilf` logs.
 
 ---
 
-## Web Dashboard
+## 🖥️ Web Dashboard
 
 The dashboard polls `/api/status` (~10 Hz) and is split into six tabs:
 
@@ -376,7 +394,7 @@ The dashboard polls `/api/status` (~10 Hz) and is split into six tabs:
   - **Bridge behaviour**: **USB-C disables WiFi bridge** (stage 2) and
     **Restore WiFi bridge when USB-C unplugged** (stage 3), plus the 5-minute
     auto power-off.
-  - **Factory reset**: restore the open `IgnitronUSB` AP (no password) at `192.168.1.1`.
+  - **Factory reset**: restore the open `usb2ip` AP (no password) at `192.168.1.1`.
 
 <p align="center">
   <img src="/Images/ui-wifi.png" alt="Settings tab — WiFi access point (SSID / password) and the WiFi channel card after a band scan, with per-channel congestion bars" width="300">
@@ -439,49 +457,65 @@ defaults. Holding it without the confirmation press does nothing.
 > console CH340's DTR line, which is why a plain long-press is not enough — a
 > serial terminal asserting DTR would otherwise factory-reset the board.
 
-### OTA updates
+### HTTP API
 
-The **OTA** tab updates the board over WiFi, no cable needed — the same
-`ota_manager` module used across the other Forbes Automotive ESP32 projects.
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET`  | `/api/status` | Telemetry + board/system state (JSON). `ch` = legacy fixed channels, `g` = enabled registry gauges, `ident` = ECU bootloader/firmware versions (COM/DSP/CPU) |
+| `GET`  | `/api/gauges` | Gauge registry: every channel with label/unit/range/decimals/group/type and its ECU channel index, plus on-state and whether the ECU sends it |
+| `POST` | `/api/gauges?key=..&on=0\|1` | Show/hide one gauge (persisted) |
+| `POST` | `/api/gauges?arrangeByType=0\|1` | Group the dashboard into Basic/Ignition/Knock/Injection/Advanced, or one flat grid |
+| `POST` | `/api/gauges?sweep=0\|1&autoLaunch=0\|1&hero=key&order=k1,k2,…` | Dashboard preferences: needle sweep on connect, launch on page open, top dial, flat-grid order (all persisted) |
+| `POST` | `/api/launch` | Replay the captured session handshake, then start the standalone gauge poll |
+| `POST` | `/api/unlaunch` | Stop the standalone gauge poll |
+| `GET`  | `/api/faults` | Read the ECU's stored fault memory (needs gauges launched, no USB/IP client) |
+| `POST` | `/api/faults/clear` | Wipe and commit the fault memory, as Ignitron's Clear button does |
+| `WS`   | `/ws/capture` | Raw USB record stream (binary frames, tapcap format); text frames sent up become `0xFF` note records. One client at a time |
+| `GET`  | `/api/ota/info` | Firmware version, board and chip revision |
+| `POST` | `/api/ota` | Firmware image upload (`firmware.bin` → `U_FLASH`), reboots when done |
+| `POST` | `/api/ota/fs` | Filesystem image upload (`littlefs.bin` → `U_SPIFFS`), does **not** reboot |
+| `GET`  | `/api/wifi` | Current AP SSID, whether secured, and IP |
+| `POST` | `/api/wifi?ssid=..&password=..` | Set AP credentials (blank or ≥ 8-char password) and reboot |
+| `POST` | `/api/factory` | Restore factory defaults (open AP) and reboot |
+| `POST` | `/api/settings?usbcDisablesWifi=1&restoreWifiOnUnplug=0` | Update + persist toggles |
+| `POST` | `/api/wake` | Re-power the ECU and restart the idle timer |
+| `GET/POST` | `/api/log/config` | Logging channel set (`channels=12,15,…` ECU indices) and `rate` |
+| `POST` | `/api/log/start[?name=…]`, `/api/log/stop` | Device logging (optional file name) |
+| `POST` | `/api/log/clear` | Delete every stored log (except one being written) |
+| `GET`  | `/api/log/status` | Running state, rows/bytes, flash free, stored files |
+| `GET`  | `/api/log/download?name=…&fmt=csv\|raw` | Download a log (CSV converted on the fly) |
+| `POST` | `/api/log/delete?name=…` | Delete a stored log |
+| `GET`  | `/api/log/sample` | One row of the logging channel set (browser-side logging) |
+| `GET/POST` | `/api/params` | Export / import dashboard + logging parameters (JSON) |
 
-It is deliberately **two-stage**, and the order matters:
+### Over-the-Air Updates
 
-1. **Filesystem** (`littlefs.bin`) — the web UI. Written to the spiffs
-   partition; deliberately does *not* reboot.
-2. **Firmware** (`firmware.bin`) — the application. Written to the inactive OTA
-   app slot, then the board reboots.
+Everything happens on the **OTA** tab; USB is only needed for the very first install, or if the web interface is ever lost.
 
-Doing the filesystem first means the new UI and the firmware that serves it
-arrive together on the single reboot at the end, instead of a rebooted board
-briefly serving a stale UI. The tab tracks which stage is done (persisted
-briefly in the browser, so the indicator survives the reboot) and pre-selects
-the firmware step when you come back.
+- **Update from GitHub** — press **Check for updates**. The page reads the release list from [`adamforbes92/usb2ip`](https://github.com/adamforbes92/usb2ip) (`Releases/releases.json` plus the `V…` folders), shows *Installed* vs. *Latest* (older and beta releases sit behind a tick-box, for rolling back), then installs the selected version in six tracked steps: download and flash the web UI, verify it, download and flash the firmware, reboot. The browser needs internet *while it can still reach the controller* — join the controller to your router in the **Home WiFi (Bridge Mode)** card, put the phone on the same network and open the address the card shows (`http://usb2ip.local/` works there too). On the controller's own access point alone most phones drop mobile data.
+- **Home WiFi (Bridge Mode)** — the controller joins a home or garage network as a station alongside its own access point. Scan or type the network name, save, and once it shows *Connected* the controller is reachable from that network as well. It tries hard for 20 s after boot, then once every 5 minutes, so a saved network can't disturb the access point when the car is parked away from home.
+- **Update from Files** — no internet needed: download `littlefs.bin` and `firmware.bin` from the newest `Releases/V…/` folder and upload them here, **Filesystem** (web UI) first, then **Firmware**. The device reboots after the firmware.
 
-<p align="center"><img src="/Images/ui-ota.png" alt="OTA tab — firmware info and the two-step filesystem / firmware uploader" width="300"></p>
+Every upload is size-checked, and a filesystem image is verified by mounting it before the device reports success — a failed filesystem upload is wiped rather than left half-written. If the web interface is ever missing (a filesystem update that stopped part-way), the controller serves a **recovery page** at its address with the same two uploads and partition diagnostics, so it is never a USB job. Web assets are served `no-cache`, so a new UI is never hidden behind a stale copy in the phone's browser. `GET /api/ota/info` reports the firmware and web UI versions shown at the top of the tab; `GET /api/ota/check` gates updates on the device being in a safe state.
 
-Build the two images with `pio run` and `pio run -t buildfs`; they land in
-`$SYSTEMDRIVE/.platformio/ignitronusb-pio/build/ignitronusb-idf/` as
-`firmware.bin` and `littlefs.bin`.
-
-An upload also holds off the 5-minute idle watchdog (`otaInProgress()` feeds
-`compute_wifi_in_use()`), so the radio and ECU rail can't be cut mid-write.
+<p align="center"><img src="/Images/ui-ota.png" alt="OTA tab — Update from GitHub, Home WiFi bridge mode and Update from Files" width="300"></p>
 
 ---
 
-## Building
+## 🔨 Building
 
 Two PlatformIO environments build the same sources:
 
 | env | what | when |
 |-----|------|------|
-| `ignitronusb-idf` (default) | Arduino core compiled as an ESP-IDF component, honouring [`sdkconfig.defaults`](sdkconfig.defaults): 32 KB lwIP TCP windows (fast-retransmit instead of 0.5–1 s stalls on a lost WiFi frame), USB-host tuning, selective Arduino compilation | normal use |
-| `ignitronusb` | precompiled Arduino core (5.7 KB TCP windows) | fallback |
+| `usb2ip-idf` (default) | Arduino core compiled as an ESP-IDF component, honouring [`sdkconfig.defaults`](sdkconfig.defaults): 32 KB lwIP TCP windows (fast-retransmit instead of 0.5–1 s stalls on a lost WiFi frame), USB-host tuning, selective Arduino compilation | normal use |
+| `usb2ip` | precompiled Arduino core (5.7 KB TCP windows) | fallback |
 
 ```powershell
 pio run                              # default env (arduino+espidf)
 pio run -t upload                    # flash it
 pio run -t uploadfs                  # flash the web UI (data/) — after any UI change
-pio run -e ignitronusb -t upload     # fallback env
+pio run -e usb2ip -t upload     # fallback env
 ```
 
 Notes for the `-idf` env:
@@ -500,9 +534,9 @@ Notes for the `-idf` env:
   links before freshly compiled app objects land; the second pass is clean.
 - `sdkconfig.defaults` is generated from the exact sdkconfig the precompiled core
   was built with, plus the overrides marked at the top; the effective config lands
-  in `sdkconfig.ignitronusb-idf` (generated, ignored).
+  in `sdkconfig.usb2ip-idf` (generated, ignored).
 
-## Debugging
+## 🐛 Debugging
 
 Tagged, per-subsystem serial debug is configured in [`include/defs.h`](include/defs.h)
 (`enableDebug` master switch; `[SYS] [WiFi] [USB] [ECU] [TAP] [WEB]` tags). Per-URB
@@ -516,7 +550,7 @@ break serial-adapter drivers. A 1 Hz line summarises key state:
 
 ---
 
-## Credits & License
+## 🙏 Credits & License
 
 - USB/IP + USB-host core ported from
   [tiehfood/esphome-usbip-printer](https://github.com/tiehfood/esphome-usbip-printer)
