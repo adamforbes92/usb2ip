@@ -1,5 +1,7 @@
 # usb2ip
 
+**Get one ready-built:** [usb2ip at Forbes Automotive](https://forbes-automotive.com/products/usb2ip?utm_source=github&utm_medium=readme&utm_campaign=usb2ip) · More boards and guides at [forbes-automotive.com](https://forbes-automotive.com/?utm_source=github&utm_medium=readme&utm_campaign=usb2ip).
+
 **A wireless USB/IP bridge and live-gauge dashboard for an aftermarket ECU, powered by an ESP32-S3.**
 
 usb2ip lets a Windows laptop talk to a USB ECU (*Ignitron*) **over WiFi** using the standard
