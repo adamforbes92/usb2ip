@@ -1,7 +1,24 @@
 {
   "product": "usb2ip",
-  "latest": "1.0",
+  "latest": "2.1",
   "releases": [
+    {
+      "version": "2.1",
+      "channel": "stable",
+      "date": "2026-11-22",
+      "ota": true,
+      "notes": "ECU link rework (Ignitron-matched session start, validated polling, adaptation maps). FTDI cables such as VCDS interfaces now work through the bridge (idle status replies answered on the bridge, a cancelled request on a finished transfer is answered). New boards default to WiFi channel 1 (same as can2gauge and OpenHaldex; boards already set up keep theirs). Phone touch UI: no long-press copy menu, scrolling never moves a slider.",
+      "firmware": {
+        "path": "V2.1/firmware.bin",
+        "size": 1794336,
+        "sha256": "b01e1fd69d0736939a47bec9ea412c5dc75ee568b595363a7f0b726f8238ffe4"
+      },
+      "filesystem": {
+        "path": "V2.1/littlefs.bin",
+        "size": 3538944,
+        "sha256": "3f9a51137e9769f4889efac50e6cad94c0d8943e50edeb3e7efc5cd859a71c15"
+      }
+    },
     {
       "version": "1.0",
       "channel": "stable",
@@ -16,7 +33,7 @@
       "filesystem": {
         "path": "V1.0/littlefs.bin",
         "size": 3538944,
-        "sha256": "6da50017c3037b697d03df9fa9801bfc24b7279122974bec4607e2a7c78da4c5"
+        "sha256": "033f0e20b9f13126961945b418d62e9e18f1b4170ce1403747a04b000225b5b0"
       }
     },
     {
